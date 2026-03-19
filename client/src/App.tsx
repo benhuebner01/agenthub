@@ -1,4 +1,4 @@
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import Layout from './components/Layout'
 import { ToastProvider } from './components/Toaster'
@@ -10,6 +10,10 @@ import Runs from './pages/Runs'
 import Budgets from './pages/Budgets'
 import Logs from './pages/Logs'
 import Setup from './pages/Setup'
+import Organization from './pages/Organization'
+import BusinessSetup from './pages/BusinessSetup'
+import Costs from './pages/Costs'
+import SettingsPage from './pages/Settings'
 import { getSetupStatus } from './api/client'
 
 function AppRoutes() {
@@ -19,7 +23,6 @@ function AppRoutes() {
   const [setupComplete, setSetupComplete] = useState(false)
 
   useEffect(() => {
-    // Don't redirect if already on /setup
     if (location.pathname === '/setup') {
       setChecked(true)
       return
@@ -34,13 +37,11 @@ function AppRoutes() {
         }
       })
       .catch(() => {
-        // If the endpoint is unavailable or returns an error, don't block the app
         setSetupComplete(true)
       })
       .finally(() => setChecked(true))
   }, [navigate, location.pathname])
 
-  // Avoid a flash of the main app before the redirect
   if (!checked && location.pathname !== '/setup') {
     return null
   }
@@ -62,13 +63,17 @@ function AppRoutes() {
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/budgets" element={<Budgets />} />
                 <Route path="/logs" element={<Logs />} />
+                <Route path="/organization" element={<Organization />} />
+                <Route path="/business-setup" element={<BusinessSetup />} />
+                <Route path="/costs" element={<Costs />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/proposals" element={<Navigate to="/organization" replace />} />
               </Routes>
             </Layout>
           }
         />
       </Routes>
 
-      {/* Internal Agent Chat — always visible when setup is complete */}
       {!isSetupPage && setupComplete && <InternalAgentChat />}
     </>
   )

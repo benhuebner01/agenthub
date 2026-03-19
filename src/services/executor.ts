@@ -3,7 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
 import { db } from '../db';
-import { runs, auditLogs, agents } from '../db/schema';
+import { runs, auditLogs, agents, agentMemory, proposals } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -36,6 +36,55 @@ export interface ExecutionResult {
   tokensUsed: number;
   costUsd: number;
   error?: string;
+}
+
+// ─── Memory Helpers ───────────────────────────────────────────────────────────
+
+async function loadAgentMemoryContext(agentId: string): Promise<string> {
+  try {
+    const memories = await db.select().from(agentMemory).where(eq(agentMemory.agentId, agentId));
+    if (memories.length === 0) return '';
+    return '\n\nYour persistent memory:\n' + memories.map(m => `${m.key}: ${m.value}`).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+// ─── CEO Proposal Parser ──────────────────────────────────────────────────────
+
+async function parseCeoProposals(
+  output: unknown,
+  agentRecord: { id: string; organizationId?: string | null; role?: string | null }
+): Promise<void> {
+  if (agentRecord.role !== 'ceo') return;
+
+  const text = typeof output === 'string' ? output
+    : (output as any)?.text
+    ? (output as any).text
+    : JSON.stringify(output);
+
+  const proposalRegex = /<proposal>([\s\S]*?)<\/proposal>/g;
+  let match;
+
+  while ((match = proposalRegex.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      await db.insert(proposals).values({
+        id: uuidv4(),
+        organizationId: agentRecord.organizationId || null,
+        proposedByAgentId: agentRecord.id,
+        type: parsed.type || 'strategy',
+        title: parsed.title || 'Untitled Proposal',
+        details: parsed,
+        reasoning: parsed.reasoning || null,
+        estimatedCostUsd: parsed.estimatedMonthlyCostUsd || parsed.estimatedCostUsd || null,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
+    } catch {
+      // Malformed JSON in proposal block — skip silently
+    }
+  }
 }
 
 // ─── HTTP Agent ───────────────────────────────────────────────────────────────
@@ -71,7 +120,7 @@ async function executeHttpAgent(config: Record<string, unknown>, input: unknown)
 
 // ─── Claude Agent ─────────────────────────────────────────────────────────────
 
-async function executeClaudeAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+async function executeClaudeAgent(config: Record<string, unknown>, input: unknown, memoryContext: string): Promise<ExecutionResult> {
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
 
   const apiKey = (config.api_key_override as string) || process.env.ANTHROPIC_API_KEY;
@@ -81,7 +130,8 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
 
   const client = new Anthropic({ apiKey });
   const model = (config.model as string) || 'claude-sonnet-4-6';
-  const systemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
+  const baseSystemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
+  const systemPrompt = baseSystemPrompt + memoryContext;
 
   const userMessage = typeof input === 'string' ? input : JSON.stringify(input);
 
@@ -114,7 +164,7 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
 
 // ─── OpenAI Agent ─────────────────────────────────────────────────────────────
 
-async function executeOpenAIAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+async function executeOpenAIAgent(config: Record<string, unknown>, input: unknown, memoryContext: string): Promise<ExecutionResult> {
   const OpenAI = (await import('openai')).default;
 
   const apiKey = (config.api_key_override as string) || process.env.OPENAI_API_KEY;
@@ -124,7 +174,8 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
 
   const client = new OpenAI({ apiKey });
   const model = (config.model as string) || 'gpt-4o';
-  const systemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
+  const baseSystemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
+  const systemPrompt = baseSystemPrompt + memoryContext;
 
   const userMessage = typeof input === 'string' ? input : JSON.stringify(input);
 
@@ -191,7 +242,6 @@ async function executeBashAgent(config: Record<string, unknown>, input: unknown)
 // ─── Claude Code CLI Agent ────────────────────────────────────────────────────
 
 async function executeClaudeCodeAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // config: { model?: string, systemPrompt?: string, maxTurns?: number, workDir?: string, tools?: string }
   const { execSync } = require('child_process');
   const model = (config.model as string) || 'claude-sonnet-4-6';
   const maxTurns = (config.maxTurns as number) || 5;
@@ -219,7 +269,6 @@ async function executeClaudeCodeAgent(config: Record<string, unknown>, input: un
 // ─── OpenAI Codex CLI Agent ───────────────────────────────────────────────────
 
 async function executeOpenAICodexAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // config: { model?: string, workDir?: string, mode?: 'suggest' | 'auto-edit' | 'full-auto' }
   const { execSync } = require('child_process');
   const workDir = (config.workDir as string) || process.cwd();
   const mode = (config.mode as string) || 'full-auto';
@@ -241,7 +290,6 @@ async function executeOpenAICodexAgent(config: Record<string, unknown>, input: u
 // ─── Cursor Agent ─────────────────────────────────────────────────────────────
 
 async function executeCursorAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // config: { workDir?: string, outputFormat?: 'text' | 'json' | 'stream-json' }
   const { execSync } = require('child_process');
   const workDir = (config.workDir as string) || process.cwd();
   const fmt = (config.outputFormat as string) || 'text';
@@ -268,7 +316,6 @@ async function executeCursorAgent(config: Record<string, unknown>, input: unknow
 // ─── OpenClaw Agent ───────────────────────────────────────────────────────────
 
 async function executeOpenClawAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // config: { host?: string, port?: number, model?: string, token?: string, systemPrompt?: string }
   const host = (config.host as string) || 'localhost';
   const port = (config.port as number) || 18789;
   const model = (config.model as string) || 'openclaw:main';
@@ -305,7 +352,6 @@ async function executeOpenClawAgent(config: Record<string, unknown>, input: unkn
 // ─── A2A Protocol Agent ───────────────────────────────────────────────────────
 
 async function executeA2AAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // config: { endpoint: string, apiKey?: string, agentCardUrl?: string }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey as string}`;
 
@@ -338,19 +384,20 @@ async function executeA2AAgent(config: Record<string, unknown>, input: unknown):
 
 // ─── Internal Agent ───────────────────────────────────────────────────────────
 
-async function executeInternalAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // config: { provider?: 'anthropic'|'openai', model?: string, systemPrompt?: string }
+async function executeInternalAgent(config: Record<string, unknown>, input: unknown, memoryContext: string): Promise<ExecutionResult> {
   const provider = (config.provider as string) || (process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'openai');
 
   if (provider === 'anthropic') {
     const Anthropic = require('@anthropic-ai/sdk');
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
     const model = (config.model as string) || 'claude-sonnet-4-6';
+    const baseSystemPrompt = (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.';
+    const systemPrompt = baseSystemPrompt + memoryContext;
     const messages: any[] = [{ role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) }];
     const resp = await client.messages.create({
       model,
       max_tokens: 4096,
-      system: (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.',
+      system: systemPrompt,
       messages,
     });
     const content = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
@@ -364,10 +411,12 @@ async function executeInternalAgent(config: Record<string, unknown>, input: unkn
     const OpenAI = require('openai');
     const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
     const model = (config.model as string) || 'gpt-4o';
+    const baseSystemPrompt = (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.';
+    const systemPrompt = baseSystemPrompt + memoryContext;
     const resp = await client.chat.completions.create({
       model,
       messages: [
-        { role: 'system', content: (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.' },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) },
       ],
     });
@@ -393,6 +442,9 @@ export async function executeAgent(
   if (!agentRecord) {
     throw new Error(`Agent ${agentId} not found`);
   }
+
+  // Load persistent memory context
+  const memoryContext = await loadAgentMemoryContext(agentId);
 
   // Insert initial run record
   await db.insert(runs).values({
@@ -426,10 +478,10 @@ export async function executeAgent(
         result = await executeHttpAgent(config, input);
         break;
       case 'claude':
-        result = await executeClaudeAgent(config, input);
+        result = await executeClaudeAgent(config, input, memoryContext);
         break;
       case 'openai':
-        result = await executeOpenAIAgent(config, input);
+        result = await executeOpenAIAgent(config, input, memoryContext);
         break;
       case 'bash':
         result = await executeBashAgent(config, input);
@@ -450,7 +502,7 @@ export async function executeAgent(
         result = await executeA2AAgent(config, input);
         break;
       case 'internal':
-        result = await executeInternalAgent(config, input);
+        result = await executeInternalAgent(config, input, memoryContext);
         break;
       default:
         throw new Error(`Unknown agent type: ${agentRecord.type}`);
@@ -483,6 +535,13 @@ export async function executeAgent(
         durationMs: Date.now() - agentCreatedAt,
       },
       createdAt: new Date().toISOString(),
+    });
+
+    // If agent is CEO, parse output for proposal blocks
+    await parseCeoProposals(result.output, {
+      id: agentRecord.id,
+      organizationId: agentRecord.organizationId,
+      role: agentRecord.role,
     });
 
     return result;

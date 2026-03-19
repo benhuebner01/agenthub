@@ -13,9 +13,11 @@ import {
   Globe,
   Terminal,
   Cpu,
+  Building2,
 } from 'lucide-react'
 import {
   getAgents,
+  getOrganizations,
   deleteAgent,
   updateAgent,
   runAgent,
@@ -34,12 +36,25 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   bash: Terminal,
 }
 
+const ROLE_BADGE: Record<string, string> = {
+  ceo: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  manager: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  worker: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  specialist: 'bg-green-500/20 text-green-300 border-green-500/30',
+}
+
 function formatDate(dt: string | null): string {
   if (!dt) return '-'
   return new Date(dt).toLocaleString()
 }
 
-function AgentRow({ agent }: { agent: Agent }) {
+function AgentRow({
+  agent,
+  orgMap,
+}: {
+  agent: Agent & { parentAgentName?: string | null; childrenCount?: number }
+  orgMap: Map<string, string>
+}) {
   const qc = useQueryClient()
   const toast = useToast()
   const [expanded, setExpanded] = useState(false)
@@ -85,6 +100,8 @@ function AgentRow({ agent }: { agent: Agent }) {
     onError: (err: Error) => toast.error(err.message),
   })
 
+  const orgName = agent.organizationId ? orgMap.get(agent.organizationId) : null
+
   return (
     <>
       <tr className="border-b border-dark-border hover:bg-white/3 transition-colors">
@@ -99,10 +116,22 @@ function AgentRow({ agent }: { agent: Agent }) {
               <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
             )}
             <div>
-              <p className="text-slate-200 font-medium">{agent.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-slate-200 font-medium">{agent.name}</p>
+                {agent.role && agent.role !== 'worker' && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${ROLE_BADGE[agent.role] || ''}`}>
+                    {agent.role.toUpperCase()}
+                  </span>
+                )}
+              </div>
               {agent.description && (
                 <p className="text-xs text-slate-500 mt-0.5 max-w-xs truncate">
                   {agent.description}
+                </p>
+              )}
+              {agent.parentAgentName && (
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Reports to: {agent.parentAgentName}
                 </p>
               )}
             </div>
@@ -116,6 +145,16 @@ function AgentRow({ agent }: { agent: Agent }) {
         </td>
         <td className="px-5 py-3">
           <StatusBadge status={agent.status} />
+        </td>
+        <td className="px-5 py-3">
+          {orgName ? (
+            <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+              <Building2 className="w-3 h-3" />
+              {orgName}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-600">—</span>
+          )}
         </td>
         <td className="px-5 py-3 text-xs text-slate-500">{formatDate(agent.createdAt)}</td>
         <td className="px-5 py-3">
@@ -161,7 +200,7 @@ function AgentRow({ agent }: { agent: Agent }) {
       {/* Expanded runs */}
       {expanded && (
         <tr className="border-b border-dark-border bg-dark-bg/50">
-          <td colSpan={5} className="px-10 py-4">
+          <td colSpan={6} className="px-10 py-4">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
               Last 5 Runs
             </p>
@@ -238,14 +277,23 @@ function AgentRow({ agent }: { agent: Agent }) {
 
 export default function Agents() {
   const [createOpen, setCreateOpen] = useState(false)
+  const [filterOrgId, setFilterOrgId] = useState<string>('')
+  const [filterRole, setFilterRole] = useState<string>('')
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['agents'],
-    queryFn: getAgents,
+    queryKey: ['agents', { organizationId: filterOrgId || undefined, role: filterRole || undefined }],
+    queryFn: () => getAgents({ organizationId: filterOrgId || undefined, role: filterRole || undefined }),
     refetchInterval: 30_000,
   })
 
+  const { data: orgsData } = useQuery({
+    queryKey: ['organizations'],
+    queryFn: getOrganizations,
+  })
+
   const agents = data?.data ?? []
+  const orgs = orgsData?.data ?? []
+  const orgMap = new Map(orgs.map((o) => [o.id, o.name]))
 
   return (
     <div className="space-y-5">
@@ -256,13 +304,38 @@ export default function Agents() {
             {data ? `${data.total} agent${data.total !== 1 ? 's' : ''}` : 'Loading...'}
           </p>
         </div>
-        <button
-          onClick={() => setCreateOpen(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-accent-purple hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Agent
-        </button>
+        <div className="flex items-center gap-3">
+          {orgs.length > 0 && (
+            <select
+              value={filterOrgId}
+              onChange={(e) => setFilterOrgId(e.target.value)}
+              className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-300"
+            >
+              <option value="">All Organizations</option>
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+          )}
+          <select
+            value={filterRole}
+            onChange={(e) => setFilterRole(e.target.value)}
+            className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-300"
+          >
+            <option value="">All Roles</option>
+            <option value="ceo">CEO</option>
+            <option value="manager">Manager</option>
+            <option value="worker">Worker</option>
+            <option value="specialist">Specialist</option>
+          </select>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-accent-purple hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Agent
+          </button>
+        </div>
       </div>
 
       <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
@@ -302,6 +375,9 @@ export default function Agents() {
                     Status
                   </th>
                   <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Organization
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Created
                   </th>
                   <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
@@ -311,7 +387,7 @@ export default function Agents() {
               </thead>
               <tbody>
                 {agents.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} />
+                  <AgentRow key={agent.id} agent={agent} orgMap={orgMap} />
                 ))}
               </tbody>
             </table>

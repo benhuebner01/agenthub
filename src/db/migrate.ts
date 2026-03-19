@@ -2,13 +2,27 @@ import 'dotenv/config';
 import { mode, sqlite } from './index';
 
 const sqliteDDL = `
+  CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    industry TEXT,
+    goals TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    type TEXT NOT NULL CHECK(type IN ('http','claude','openai','bash')),
+    type TEXT NOT NULL CHECK(type IN ('http','claude','openai','bash','claude-code','openai-codex','cursor','openclaw','a2a','internal')),
     config TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','error')),
+    parent_agent_id TEXT,
+    role TEXT NOT NULL DEFAULT 'worker',
+    job_description TEXT,
+    organization_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -85,6 +99,43 @@ const sqliteDDL = `
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS agent_memory (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(agent_id, key)
+  );
+
+  CREATE TABLE IF NOT EXISTS agent_calls (
+    id TEXT PRIMARY KEY,
+    caller_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    callee_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    input TEXT,
+    output TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    cost_usd REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS proposals (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+    proposed_by_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    details TEXT NOT NULL,
+    reasoning TEXT,
+    estimated_cost_usd REAL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    user_notes TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_runs_agent_id ON runs(agent_id);
   CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
@@ -92,9 +143,23 @@ const sqliteDDL = `
   CREATE INDEX IF NOT EXISTS idx_audit_logs_run_id ON audit_logs(run_id);
   CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
   CREATE INDEX IF NOT EXISTS idx_tool_calls_run_id ON tool_calls(run_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
+  CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+  CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
 `;
 
 const pgDDL = `
+  CREATE TABLE IF NOT EXISTS organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    description TEXT,
+    industry TEXT,
+    goals JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   CREATE TABLE IF NOT EXISTS agents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -102,6 +167,10 @@ const pgDDL = `
     type TEXT NOT NULL,
     config JSONB NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'active',
+    parent_agent_id UUID,
+    role TEXT NOT NULL DEFAULT 'worker',
+    job_description TEXT,
+    organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -178,11 +247,52 @@ const pgDDL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE TABLE IF NOT EXISTS agent_memory (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(agent_id, key)
+  );
+
+  CREATE TABLE IF NOT EXISTS agent_calls (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    caller_agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    callee_agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    run_id UUID REFERENCES runs(id) ON DELETE SET NULL,
+    input JSONB,
+    output JSONB,
+    status TEXT NOT NULL DEFAULT 'pending',
+    cost_usd NUMERIC(10,6) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+  );
+
+  CREATE TABLE IF NOT EXISTS proposals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    proposed_by_agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    details JSONB NOT NULL,
+    reasoning TEXT,
+    estimated_cost_usd NUMERIC(10,2),
+    status TEXT NOT NULL DEFAULT 'pending',
+    user_notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+  );
+
   CREATE INDEX IF NOT EXISTS idx_runs_agent_id ON runs(agent_id);
   CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_agent_id ON audit_logs(agent_id);
   CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
+  CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+  CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
 `;
 
 async function migrate() {
@@ -190,6 +300,17 @@ async function migrate() {
 
   if (mode === 'sqlite') {
     sqlite.exec(sqliteDDL);
+
+    // Safe ADD COLUMN for existing databases that don't have the new columns yet
+    const addColumnSafe = (sql: string) => {
+      try { sqlite.exec(sql); } catch (_e) { /* column already exists, ignore */ }
+    };
+
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN parent_agent_id TEXT`);
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'`);
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN job_description TEXT`);
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN organization_id TEXT`);
+
     console.log('Migrations complete (SQLite)');
   } else {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -197,6 +318,15 @@ async function migrate() {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     try {
       await pool.query(pgDDL);
+
+      // Safe ADD COLUMN IF NOT EXISTS for Postgres
+      await pool.query(`
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS parent_agent_id UUID;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'worker';
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS job_description TEXT;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
+      `);
+
       console.log('Migrations complete (PostgreSQL)');
     } finally {
       await pool.end();

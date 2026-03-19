@@ -13,6 +13,8 @@ export type AgentType =
   | 'a2a'
   | 'internal'
 
+export type AgentRole = 'ceo' | 'manager' | 'worker' | 'specialist'
+
 export interface Agent {
   id: string
   name: string
@@ -20,8 +22,73 @@ export interface Agent {
   type: AgentType
   config: Record<string, unknown>
   status: 'active' | 'paused' | 'error'
+  role: AgentRole
+  jobDescription: string | null
+  parentAgentId: string | null
+  parentAgentName?: string | null
+  organizationId: string | null
+  childrenCount?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface Organization {
+  id: string
+  name: string
+  description: string | null
+  industry: string | null
+  goals: string[] | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OrgChartNode {
+  id: string
+  name: string
+  role: AgentRole
+  status: string
+  description: string | null
+  jobDescription: string | null
+  type: string
+  children: OrgChartNode[]
+}
+
+export interface Proposal {
+  id: string
+  organizationId: string | null
+  proposedByAgentId: string | null
+  type: 'hire_agent' | 'restructure' | 'budget_increase' | 'strategy'
+  title: string
+  details: Record<string, unknown>
+  reasoning: string | null
+  estimatedCostUsd: number | null
+  status: 'pending' | 'approved' | 'rejected'
+  userNotes: string | null
+  createdAt: string
+  resolvedAt: string | null
+}
+
+export interface AgentMemoryEntry {
+  id: string
+  agentId: string
+  key: string
+  value: string
+  updatedAt: string
+}
+
+export interface CostSummary {
+  totalToday: number
+  totalThisWeek: number
+  totalThisMonth: number
+  byAgent: { agentId: string; name: string; cost: number; runs: number }[]
+  byDay: { date: string; cost: number }[]
+}
+
+export interface CostProjection {
+  agentId: string
+  name: string
+  last30DayCost: number
+  projectedNextMonthCost: number
 }
 
 export interface Run {
@@ -95,6 +162,10 @@ export interface CreateAgentDto {
   type: AgentType
   config: Record<string, unknown>
   status?: 'active' | 'paused' | 'error'
+  role?: AgentRole
+  jobDescription?: string
+  parentAgentId?: string
+  organizationId?: string
 }
 
 export interface AgentPreset {
@@ -119,6 +190,44 @@ export interface CreateBudgetDto {
   agentId: string
   period: 'daily' | 'weekly' | 'monthly'
   limitUsd: number
+}
+
+export interface BusinessAnalysisInput {
+  name: string
+  description: string
+  industry?: string
+  goals?: string[]
+  availableConnections?: string[]
+}
+
+export interface CreateBusinessDto {
+  organizationData: {
+    name: string
+    description?: string
+    industry?: string
+    goals?: string[]
+  }
+  ceoConfig: {
+    name: string
+    description?: string
+    type: AgentType
+    config: Record<string, unknown>
+    jobDescription?: string
+  }
+  teamConfigs?: Array<{
+    name: string
+    description?: string
+    type: AgentType
+    config: Record<string, unknown>
+    role?: AgentRole
+    jobDescription?: string
+    reportsTo?: string
+  }>
+}
+
+export interface TelegramRoutes {
+  defaultAgentId: string | null
+  commandRoutes: Record<string, string>
 }
 
 // Axios instance
@@ -154,9 +263,10 @@ api.interceptors.response.use(
   }
 )
 
-// Agents
-export const getAgents = () =>
-  api.get<{ data: Agent[]; total: number }>('/agents').then((r) => r.data)
+// ─── Agents ───────────────────────────────────────────────────────────────────
+
+export const getAgents = (params?: { organizationId?: string; role?: string }) =>
+  api.get<{ data: Agent[]; total: number }>('/agents', { params }).then((r) => r.data)
 
 export const getAgent = (id: string) =>
   api.get<{ data: Agent }>(`/agents/${id}`).then((r) => r.data)
@@ -181,7 +291,23 @@ export const getAgentRuns = (id: string, limit = 50, offset = 0) =>
     )
     .then((r) => r.data)
 
-// Runs
+// Agent delegation
+export const delegateTask = (agentId: string, targetAgentId: string, input: unknown, context?: unknown) =>
+  api.post(`/agents/${agentId}/delegate`, { targetAgentId, input, context }).then((r) => r.data)
+
+// ─── Agent Memory ─────────────────────────────────────────────────────────────
+
+export const getAgentMemory = (agentId: string) =>
+  api.get<{ data: AgentMemoryEntry[]; total: number }>(`/agents/${agentId}/memory`).then((r) => r.data)
+
+export const setAgentMemory = (agentId: string, key: string, value: string) =>
+  api.post<{ data: AgentMemoryEntry }>(`/agents/${agentId}/memory`, { key, value }).then((r) => r.data)
+
+export const deleteAgentMemory = (agentId: string, key: string) =>
+  api.delete<{ message: string }>(`/agents/${agentId}/memory/${key}`).then((r) => r.data)
+
+// ─── Runs ─────────────────────────────────────────────────────────────────────
+
 export const getRuns = (params?: {
   limit?: number
   offset?: number
@@ -203,7 +329,8 @@ export const getRunLogs = (id: string) =>
     .get<{ data: AuditLog[]; total: number }>(`/runs/${id}/logs`)
     .then((r) => r.data)
 
-// Schedules
+// ─── Schedules ────────────────────────────────────────────────────────────────
+
 export const getSchedules = () =>
   api
     .get<{ data: Schedule[]; total: number }>('/schedules')
@@ -231,7 +358,8 @@ export const disableSchedule = (id: string) =>
     .post<{ data: Schedule; message: string }>(`/schedules/${id}/disable`)
     .then((r) => r.data)
 
-// Budgets
+// ─── Budgets ──────────────────────────────────────────────────────────────────
+
 export const getBudgets = () =>
   api
     .get<{ data: Budget[]; total: number }>('/budgets')
@@ -248,7 +376,8 @@ export const resetBudget = (agentId: string) =>
     .post<{ data: Budget; message: string }>(`/budgets/${agentId}/reset`)
     .then((r) => r.data)
 
-// Audit logs (via run logs - global logs endpoint)
+// ─── Audit logs ───────────────────────────────────────────────────────────────
+
 export const getAuditLogs = (params?: { limit?: number; offset?: number }) =>
   api
     .get<{ data: AuditLog[]; total: number }>('/runs', {
@@ -256,7 +385,8 @@ export const getAuditLogs = (params?: { limit?: number; offset?: number }) =>
     })
     .then((r) => r.data)
 
-// Setup / Onboarding
+// ─── Setup / Onboarding ───────────────────────────────────────────────────────
+
 export const getSetupStatus = () =>
   api.get<{
     complete: boolean
@@ -287,14 +417,16 @@ export const testTelegram = (token: string) =>
     )
     .then((r) => r.data)
 
-// Presets
+// ─── Presets ──────────────────────────────────────────────────────────────────
+
 export const getPresets = () =>
   api.get<{ data: AgentPreset[]; total: number }>('/presets').then((r) => r.data)
 
 export const getPreset = (id: string) =>
   api.get<{ data: AgentPreset }>(`/presets/${id}`).then((r) => r.data)
 
-// Internal Agent Chat
+// ─── Internal Agent Chat ──────────────────────────────────────────────────────
+
 export const chatWithInternalAgent = (
   message: string,
   history?: { role: string; content: string }[]
@@ -306,7 +438,8 @@ export const chatWithInternalAgent = (
     )
     .then((r) => r.data)
 
-// OpenClaw Discovery
+// ─── OpenClaw Discovery ───────────────────────────────────────────────────────
+
 export const discoverOpenclaw = (host: string, port: number) =>
   api
     .get<{ connected: boolean; host: string; port: number; models?: any[]; version?: string | null; error?: string }>(
@@ -314,7 +447,8 @@ export const discoverOpenclaw = (host: string, port: number) =>
     )
     .then((r) => r.data)
 
-// A2A Card Fetch
+// ─── A2A Card Fetch ───────────────────────────────────────────────────────────
+
 export const fetchA2ACard = (endpoint: string) =>
   api
     .post<{ found: boolean; cardUrl?: string; card?: any; error?: string }>(
@@ -322,5 +456,67 @@ export const fetchA2ACard = (endpoint: string) =>
       { endpoint }
     )
     .then((r) => r.data)
+
+// ─── Business / Organizations ─────────────────────────────────────────────────
+
+export const analyzeBusiness = (data: BusinessAnalysisInput) =>
+  api.post<{ data: any }>('/business/analyze', data).then((r) => r.data)
+
+export const createBusiness = (data: CreateBusinessDto) =>
+  api.post<{ data: { organization: Organization; ceoAgent: Agent; teamAgents: Agent[] } }>('/business/create', data).then((r) => r.data)
+
+export const getOrganizations = () =>
+  api.get<{ data: Organization[]; total: number }>('/business/organizations').then((r) => r.data)
+
+export const getOrganization = (id: string) =>
+  api.get<{ data: Organization & { agents: Agent[] } }>(`/business/organizations/${id}`).then((r) => r.data)
+
+export const getOrgChart = (id: string) =>
+  api.get<{ data: { organization: Organization; chart: OrgChartNode[] } }>(`/business/organizations/${id}/chart`).then((r) => r.data)
+
+export const runCeo = (orgId: string, input: string) =>
+  api.post<{ data: any }>(`/business/organizations/${orgId}/ceo-run`, { input }).then((r) => r.data)
+
+// ─── Proposals ────────────────────────────────────────────────────────────────
+
+export const getProposals = (status?: string) =>
+  api.get<{ data: Proposal[]; total: number }>(`/business/proposals${status ? `?status=${status}` : ''}`).then((r) => r.data)
+
+export const approveProposal = (id: string) =>
+  api.post<{ data: Proposal; newAgent?: Agent }>(`/business/proposals/${id}/approve`).then((r) => r.data)
+
+export const rejectProposal = (id: string, reason?: string) =>
+  api.post<{ data: Proposal }>(`/business/proposals/${id}/reject`, { reason }).then((r) => r.data)
+
+// ─── Costs ────────────────────────────────────────────────────────────────────
+
+export const getCostSummary = () =>
+  api.get<{ data: CostSummary }>('/costs/summary').then((r) => r.data)
+
+export const getCostsByAgent = (period?: string) =>
+  api.get<{ data: any[]; total: number; period: string }>(`/costs/by-agent${period ? `?period=${period}` : ''}`).then((r) => r.data)
+
+export const getCostTimeline = (agentId?: string, from?: string, to?: string) =>
+  api.get<{ data: { date: string; cost: number }[] }>('/costs/timeline', { params: { agentId, from, to } }).then((r) => r.data)
+
+export const getCostProjections = () =>
+  api.get<{ data: CostProjection[]; totalProjectedNextMonth: number }>('/costs/projections').then((r) => r.data)
+
+// ─── Settings / Telegram Routes ───────────────────────────────────────────────
+
+export const getSettings = () =>
+  api.get<{ data: { key: string; value: string }[] }>('/settings').then((r) => r.data)
+
+export const setTelegramRoute = (agentId: string) =>
+  api.post<{ success: boolean; agentId: string }>('/settings/telegram-route', { agentId }).then((r) => r.data)
+
+export const getTelegramRoutes = () =>
+  api.get<{ data: TelegramRoutes }>('/settings/telegram-routes').then((r) => r.data)
+
+export const addTelegramCommandRoute = (command: string, agentId: string) =>
+  api.post<{ success: boolean; commandRoutes: Record<string, string> }>('/settings/telegram-routes', { command, agentId }).then((r) => r.data)
+
+export const removeTelegramCommandRoute = (command: string) =>
+  api.delete<{ success: boolean; commandRoutes: Record<string, string> }>(`/settings/telegram-routes/${encodeURIComponent(command)}`).then((r) => r.data)
 
 export default api

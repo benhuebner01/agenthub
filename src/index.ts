@@ -11,6 +11,9 @@ import runsRouter from './routes/runs';
 import setupRouter from './routes/setup';
 import presetsRouter from './routes/presets';
 import internalAgentRouter from './routes/internal-agent';
+import businessRouter from './routes/business';
+import costsRouter from './routes/costs';
+import settingsRouter from './routes/settings';
 
 // Services
 import { startScheduler, getSchedulerMode } from './services/scheduler';
@@ -49,7 +52,6 @@ app.use('/api/internal-agent', internalAgentRouter);
 
 // API Key authentication middleware (protect mutation endpoints)
 const apiAuthMiddleware = (req: Request, res: Response, next: NextFunction): void => {
-  // Setup routes are always public — no auth required
   if (req.path.startsWith('/setup')) {
     next();
     return;
@@ -57,19 +59,16 @@ const apiAuthMiddleware = (req: Request, res: Response, next: NextFunction): voi
 
   const apiSecret = process.env.API_SECRET;
 
-  // Skip auth if no secret is configured
   if (!apiSecret || apiSecret === 'change-me-in-production') {
     next();
     return;
   }
 
-  // Allow all GET requests without auth (read-only)
   if (req.method === 'GET') {
     next();
     return;
   }
 
-  // Allow OPTIONS for CORS preflight
   if (req.method === 'OPTIONS') {
     next();
     return;
@@ -91,6 +90,11 @@ app.use('/api/agents', agentsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/budgets', budgetsRouter);
 app.use('/api/runs', runsRouter);
+app.use('/api/business', businessRouter);
+app.use('/api/costs', costsRouter);
+app.use('/api/settings', settingsRouter);
+
+// Note: Proposals are served at /api/business/proposals by the business router
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {
@@ -131,6 +135,15 @@ async function runMigrations(): Promise<void> {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     try {
       await pool.query(`
+        CREATE TABLE IF NOT EXISTS organizations (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name TEXT NOT NULL,
+          description TEXT,
+          industry TEXT,
+          goals JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
         CREATE TABLE IF NOT EXISTS agents (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name TEXT NOT NULL,
@@ -138,6 +151,10 @@ async function runMigrations(): Promise<void> {
           type TEXT NOT NULL,
           config JSONB NOT NULL DEFAULT '{}',
           status TEXT NOT NULL DEFAULT 'active',
+          parent_agent_id UUID,
+          role TEXT NOT NULL DEFAULT 'worker',
+          job_description TEXT,
+          organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
@@ -206,12 +223,63 @@ async function runMigrations(): Promise<void> {
           value TEXT NOT NULL,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        CREATE TABLE IF NOT EXISTS agent_memory (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          key TEXT NOT NULL,
+          value TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(agent_id, key)
+        );
+        CREATE TABLE IF NOT EXISTS agent_calls (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          caller_agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          callee_agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          run_id UUID REFERENCES runs(id) ON DELETE SET NULL,
+          input JSONB,
+          output JSONB,
+          status TEXT NOT NULL DEFAULT 'pending',
+          cost_usd NUMERIC(10,6) NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ
+        );
+        CREATE TABLE IF NOT EXISTS proposals (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          proposed_by_agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          details JSONB NOT NULL,
+          reasoning TEXT,
+          estimated_cost_usd NUMERIC(10,2),
+          status TEXT NOT NULL DEFAULT 'pending',
+          user_notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          resolved_at TIMESTAMPTZ
+        );
         CREATE INDEX IF NOT EXISTS idx_runs_agent_id ON runs(agent_id);
         CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
         CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_agent_id ON audit_logs(agent_id);
         CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+        CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
       `);
+
+      // Add new columns to agents if they don't exist
+      try {
+        await pool.query(`
+          ALTER TABLE agents ADD COLUMN IF NOT EXISTS parent_agent_id UUID;
+          ALTER TABLE agents ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'worker';
+          ALTER TABLE agents ADD COLUMN IF NOT EXISTS job_description TEXT;
+          ALTER TABLE agents ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
+        `);
+      } catch {
+        // Columns may already exist
+      }
+
       console.log('[DB] PostgreSQL migrations complete');
     } finally {
       await pool.end();
@@ -219,8 +287,22 @@ async function runMigrations(): Promise<void> {
   } else {
     // SQLite mode
     const { sqlite } = await import('./db/index');
+
+    const addColumnSafe = (sql: string) => {
+      try { sqlite.exec(sql); } catch (_e) { /* already exists */ }
+    };
+
     try {
       sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS organizations (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          industry TEXT,
+          goals TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS agents (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -228,6 +310,10 @@ async function runMigrations(): Promise<void> {
           type TEXT NOT NULL,
           config TEXT NOT NULL DEFAULT '{}',
           status TEXT NOT NULL DEFAULT 'active',
+          parent_agent_id TEXT,
+          role TEXT NOT NULL DEFAULT 'worker',
+          job_description TEXT,
+          organization_id TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -296,6 +382,40 @@ async function runMigrations(): Promise<void> {
           value TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS agent_memory (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          key TEXT NOT NULL,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(agent_id, key)
+        );
+        CREATE TABLE IF NOT EXISTS agent_calls (
+          id TEXT PRIMARY KEY,
+          caller_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          callee_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          input TEXT,
+          output TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          cost_usd REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS proposals (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+          proposed_by_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          details TEXT NOT NULL,
+          reasoning TEXT,
+          estimated_cost_usd REAL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          user_notes TEXT,
+          created_at TEXT NOT NULL,
+          resolved_at TEXT
+        );
         CREATE INDEX IF NOT EXISTS idx_runs_agent_id ON runs(agent_id);
         CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
         CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
@@ -303,11 +423,22 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_audit_logs_run_id ON audit_logs(run_id);
         CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
         CREATE INDEX IF NOT EXISTS idx_tool_calls_run_id ON tool_calls(run_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+        CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
       `);
-      console.log('[DB] SQLite migrations complete');
     } catch (migrateErr) {
       console.warn('[DB] Migration warning (tables may already exist):', (migrateErr as Error).message);
     }
+
+    // Safely add new columns to existing agents table
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN parent_agent_id TEXT`);
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'`);
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN job_description TEXT`);
+    addColumnSafe(`ALTER TABLE agents ADD COLUMN organization_id TEXT`);
+
+    console.log('[DB] SQLite migrations complete');
   }
 }
 
@@ -380,7 +511,6 @@ async function main() {
       process.exit(0);
     });
 
-    // Force exit after 10 seconds
     setTimeout(() => {
       console.error('[Server] Forced shutdown after timeout');
       process.exit(1);

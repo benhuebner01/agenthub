@@ -1,5 +1,16 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, unique } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
+
+// Organizations table
+export const organizations = sqliteTable('organizations', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  description: text('description'),
+  industry: text('industry'),
+  goals: text('goals', { mode: 'json' }), // string[]
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
 
 // Agents table
 export const agents = sqliteTable('agents', {
@@ -9,6 +20,11 @@ export const agents = sqliteTable('agents', {
   type: text('type').notNull(), // 'http' | 'claude' | 'openai' | 'bash'
   config: text('config', { mode: 'json' }).notNull().default('{}'),
   status: text('status').notNull().default('active'), // 'active' | 'paused' | 'error'
+  // Hierarchy fields
+  parentAgentId: text('parent_agent_id'), // self-reference, no FK to avoid circular
+  role: text('role').notNull().default('worker'), // 'ceo' | 'manager' | 'worker' | 'specialist'
+  jobDescription: text('job_description'),
+  organizationId: text('organization_id'),
   createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
@@ -92,16 +108,65 @@ export const settings = sqliteTable('settings', {
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
 
+// Agent Memory table — persistent key-value per agent
+export const agentMemory = sqliteTable('agent_memory', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+}, (t) => ({ unq: unique().on(t.agentId, t.key) }));
+
+// Agent Calls table — agent-to-agent delegation
+export const agentCalls = sqliteTable('agent_calls', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  callerAgentId: text('caller_agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  calleeAgentId: text('callee_agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  runId: text('run_id').references(() => runs.id, { onDelete: 'set null' }),
+  input: text('input', { mode: 'json' }),
+  output: text('output', { mode: 'json' }),
+  status: text('status').notNull().default('pending'), // pending | running | success | failed
+  costUsd: real('cost_usd').notNull().default(0),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  completedAt: text('completed_at'),
+});
+
+// Proposals table — CEO proposes new agents/strategy changes
+export const proposals = sqliteTable('proposals', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  proposedByAgentId: text('proposed_by_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  type: text('type').notNull(), // 'hire_agent' | 'restructure' | 'budget_increase' | 'strategy'
+  title: text('title').notNull(),
+  details: text('details', { mode: 'json' }).notNull(),
+  reasoning: text('reasoning'),
+  estimatedCostUsd: real('estimated_cost_usd'),
+  status: text('status').notNull().default('pending'), // pending | approved | rejected
+  userNotes: text('user_notes'),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  resolvedAt: text('resolved_at'),
+});
+
 // Type exports for settings
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
 
 // Relations
+export const organizationsRelations = relations(organizations, ({ many }) => ({
+  agents: many(agents),
+  proposals: many(proposals),
+}));
+
 export const agentsRelations = relations(agents, ({ many, one }) => ({
   schedules: many(schedules),
   runs: many(runs),
   budget: one(budgets, { fields: [agents.id], references: [budgets.agentId] }),
   auditLogs: many(auditLogs),
+  organization: one(organizations, { fields: [agents.organizationId], references: [organizations.id] }),
+  memory: many(agentMemory),
+  callerCalls: many(agentCalls, { relationName: 'callerAgent' }),
+  calleeCalls: many(agentCalls, { relationName: 'calleeAgent' }),
+  proposals: many(proposals),
 }));
 
 export const schedulesRelations = relations(schedules, ({ one, many }) => ({
@@ -129,6 +194,21 @@ export const toolCallsRelations = relations(toolCalls, ({ one }) => ({
   run: one(runs, { fields: [toolCalls.runId], references: [runs.id] }),
 }));
 
+export const agentMemoryRelations = relations(agentMemory, ({ one }) => ({
+  agent: one(agents, { fields: [agentMemory.agentId], references: [agents.id] }),
+}));
+
+export const agentCallsRelations = relations(agentCalls, ({ one }) => ({
+  callerAgent: one(agents, { fields: [agentCalls.callerAgentId], references: [agents.id], relationName: 'callerAgent' }),
+  calleeAgent: one(agents, { fields: [agentCalls.calleeAgentId], references: [agents.id], relationName: 'calleeAgent' }),
+  run: one(runs, { fields: [agentCalls.runId], references: [runs.id] }),
+}));
+
+export const proposalsRelations = relations(proposals, ({ one }) => ({
+  organization: one(organizations, { fields: [proposals.organizationId], references: [organizations.id] }),
+  proposedByAgent: one(agents, { fields: [proposals.proposedByAgentId], references: [agents.id] }),
+}));
+
 // Type exports
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
@@ -144,3 +224,11 @@ export type ToolCall = typeof toolCalls.$inferSelect;
 export type NewToolCall = typeof toolCalls.$inferInsert;
 export type TelegramUser = typeof telegramUsers.$inferSelect;
 export type NewTelegramUser = typeof telegramUsers.$inferInsert;
+export type Organization = typeof organizations.$inferSelect;
+export type NewOrganization = typeof organizations.$inferInsert;
+export type AgentMemory = typeof agentMemory.$inferSelect;
+export type NewAgentMemory = typeof agentMemory.$inferInsert;
+export type AgentCall = typeof agentCalls.$inferSelect;
+export type NewAgentCall = typeof agentCalls.$inferInsert;
+export type Proposal = typeof proposals.$inferSelect;
+export type NewProposal = typeof proposals.$inferInsert;
