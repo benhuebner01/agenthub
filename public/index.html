@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AgentHub - AI Agent Orchestration</title>
+<style>
+  :root{--bg:#0f0f1a;--bg2:#161625;--bg3:#1e1e35;--border:#2a2a4a;--accent:#7c6af7;--accent2:#5b8cf7;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--gray:#6b7280;--text:#e2e8f0;--text2:#94a3b8;--radius:8px;--shadow:0 4px 24px rgba(0,0,0,.4)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;display:flex;height:100vh;overflow:hidden}
+  /* Scrollbar */
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-track{background:var(--bg2)}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  /* Sidebar */
+  #sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+  #logo{padding:20px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  #logo span.icon{font-size:22px}
+  #logo span.title{font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  #logo small{font-size:10px;color:var(--gray);margin-top:2px;display:block;-webkit-text-fill-color:var(--gray)}
+  nav{flex:1;padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+  nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);color:var(--text2);text-decoration:none;cursor:pointer;transition:all .15s;font-size:13px;font-weight:500}
+  nav a:hover{background:var(--bg3);color:var(--text)}
+  nav a.active{background:linear-gradient(135deg,rgba(124,106,247,.2),rgba(91,140,247,.1));color:var(--accent);border:1px solid rgba(124,106,247,.3)}
+  nav a .nav-icon{width:18px;text-align:center;font-size:16px}
+  #sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--gray)}
+  /* Main */
+  #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+  #topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+  #page-title{font-size:18px;font-weight:600}
+  #topbar-right{display:flex;align-items:center;gap:12px}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+  #content{flex:1;overflow-y:auto;padding:24px}
+  /* Cards */
+  .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+  .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .card-title{font-size:14px;font-weight:600;color:var(--text)}
+  /* Stats row */
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px}
+  .stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+  .stat-label{font-size:11px;color:var(--gray);text-transform:uppercase;letter-spacing:.05em}
+  .stat-value{font-size:28px;font-weight:700;margin-top:4px}
+  .stat-value.green{color:var(--green)}
+  .stat-value.accent{color:var(--accent)}
+  .stat-value.red{color:var(--red)}
+  .stat-value.yellow{color:var(--yellow)}
+  /* Table */
+  .table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+  table{width:100%;border-collapse:collapse;background:var(--bg2)}
+  thead tr{border-bottom:1px solid var(--border)}
+  th{padding:10px 16px;text-align:left;font-size:11px;color:var(--gray);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  td{padding:12px 16px;border-bottom:1px solid rgba(42,42,74,.5);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  /* Badges */
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge.active,.badge.success{background:rgba(34,197,94,.15);color:var(--green)}
+  .badge.paused,.badge.cancelled{background:rgba(107,114,128,.15);color:var(--gray)}
+  .badge.error,.badge.failed{background:rgba(239,68,68,.15);color:var(--red)}
+  .badge.running,.badge.pending{background:rgba(234,179,8,.15);color:var(--yellow)}
+  .badge.http{background:rgba(91,140,247,.15);color:var(--accent2)}
+  .badge.claude{background:rgba(124,106,247,.15);color:var(--accent)}
+  .badge.openai{background:rgba(16,185,129,.15);color:#10b981}
+  .badge.bash{background:rgba(249,115,22,.15);color:#f97316}
+  /* Buttons */
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;border:none;white-space:nowrap}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:#6957e8}
+  .btn-secondary{background:var(--bg3);color:var(--text);border:1px solid var(--border)}
+  .btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-danger{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+  .btn-danger:hover{background:rgba(239,68,68,.25)}
+  .btn-success{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+  .btn-success:hover{background:rgba(34,197,94,.25)}
+  .btn-sm{padding:4px 10px;font-size:12px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  /* Forms */
+  .form-group{margin-bottom:16px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px}
+  input,select,textarea{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;font-family:inherit;transition:border-color .15s;outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  textarea{resize:vertical;min-height:100px;font-family:'Courier New',monospace;font-size:12px}
+  select option{background:var(--bg3)}
+  /* Modal */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+  .modal{background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow)}
+  .modal-header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .modal-title{font-size:16px;font-weight:600}
+  .modal-close{background:none;border:none;color:var(--gray);cursor:pointer;font-size:20px;padding:0 4px;line-height:1}
+  .modal-close:hover{color:var(--text)}
+  .modal-body{padding:24px}
+  .modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+  /* Progress bar */
+  .progress-wrap{margin:12px 0}
+  .progress-label{display:flex;justify-content:space-between;margin-bottom:6px;font-size:12px}
+  .progress-bar{height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+  .progress-fill{height:100%;border-radius:4px;transition:width .3s;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .progress-fill.warn{background:linear-gradient(90deg,var(--yellow),#f59e0b)}
+  .progress-fill.danger{background:linear-gradient(90deg,var(--red),#dc2626)}
+  /* Log feed */
+  #log-feed{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-family:'Courier New',monospace;font-size:12px;max-height:500px;overflow-y:auto;line-height:1.6}
+  .log-entry{padding:3px 0;border-bottom:1px solid rgba(42,42,74,.3)}
+  .log-entry:last-child{border-bottom:none}
+  .log-ts{color:var(--gray)}
+  .log-type{font-weight:600;margin:0 8px}
+  .log-type.run_started{color:var(--accent2)}
+  .log-type.run_completed{color:var(--green)}
+  .log-type.run_failed{color:var(--red)}
+  .log-type.default{color:var(--yellow)}
+  /* Toast */
+  #toast-container{position:fixed;bottom:24px;right:24px;z-index:200;display:flex;flex-direction:column;gap:8px}
+  .toast{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 16px;min-width:280px;max-width:380px;box-shadow:var(--shadow);animation:slideIn .2s ease;display:flex;align-items:flex-start;gap:10px}
+  .toast.success{border-left:3px solid var(--green)}
+  .toast.error{border-left:3px solid var(--red)}
+  .toast.info{border-left:3px solid var(--accent)}
+  @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes slideOut{from{opacity:1}to{opacity:0;transform:translateX(100%)}}
+  .toast-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+  .toast-msg{font-size:13px;line-height:1.4}
+  /* Empty state */
+  .empty{text-align:center;padding:48px 24px;color:var(--gray)}
+  .empty-icon{font-size:40px;margin-bottom:12px}
+  /* Spinner */
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* Section tabs */
+  .section{display:none}
+  .section.active{display:block}
+  /* Mono */
+  .mono{font-family:'Courier New',monospace;font-size:11px}
+  /* Actions col */
+  .actions{display:flex;gap:6px;flex-wrap:nowrap}
+  /* Refresh indicator */
+  #refresh-indicator{font-size:11px;color:var(--gray)}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="logo">
+    <span class="icon">⚡</span>
+    <div>
+      <span class="title">AgentHub</span>
+      <small>v1.0.0</small>
+    </div>
+  </div>
+  <nav>
+    <a class="active" onclick="showSection('agents')" data-section="agents">
+      <span class="nav-icon">🤖</span> Agents
+    </a>
+    <a onclick="showSection('schedules')" data-section="schedules">
+      <span class="nav-icon">⏰</span> Schedules
+    </a>
+    <a onclick="showSection('runs')" data-section="runs">
+      <span class="nav-icon">▶️</span> Runs
+    </a>
+    <a onclick="showSection('budgets')" data-section="budgets">
+      <span class="nav-icon">💰</span> Budgets
+    </a>
+    <a onclick="showSection('logs')" data-section="logs">
+      <span class="nav-icon">📋</span> Audit Logs
+    </a>
+  </nav>
+  <div id="sidebar-footer">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <div class="status-dot" id="health-dot"></div>
+      <span id="health-text">Checking...</span>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="topbar">
+    <div id="page-title">Agents</div>
+    <div id="topbar-right">
+      <span id="refresh-indicator"></span>
+      <button class="btn btn-secondary btn-sm" onclick="refreshCurrent()">↻ Refresh</button>
+      <button class="btn btn-primary btn-sm" id="add-btn" onclick="openAddModal()">+ Add Agent</button>
+    </div>
+  </div>
+
+  <div id="content">
+    <!-- Agents Section -->
+    <div class="section active" id="section-agents">
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value accent" id="stat-total">—</div></div>
+        <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value green" id="stat-active">—</div></div>
+        <div class="stat-card"><div class="stat-label">Paused</div><div class="stat-value yellow" id="stat-paused">—</div></div>
+        <div class="stat-card"><div class="stat-label">Errored</div><div class="stat-value red" id="stat-error">—</div></div>
+      </div>
+      <div class="table-wrap">
+        <table id="agents-table">
+          <thead><tr><th>Name</th><th>Type</th><th>Description</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="agents-tbody"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Schedules Section -->
+    <div class="section" id="section-schedules">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Agent</th><th>Cron Expression</th><th>Last Run</th><th>Next Run</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="schedules-tbody"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div style="margin-top:16px">
+        <button class="btn btn-primary" onclick="openAddScheduleModal()">+ Add Schedule</button>
+      </div>
+    </div>
+
+    <!-- Runs Section -->
+    <div class="section" id="section-runs">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="display:flex;gap:10px">
+          <select id="run-filter-status" onchange="loadRuns()" style="width:140px">
+            <option value="">All Statuses</option>
+            <option value="success">Success</option>
+            <option value="failed">Failed</option>
+            <option value="running">Running</option>
+            <option value="pending">Pending</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="run-filter-agent" onchange="loadRuns()" style="width:180px">
+            <option value="">All Agents</option>
+          </select>
+        </div>
+        <span style="font-size:12px;color:var(--gray)" id="runs-auto-refresh">Auto-refreshes every 10s</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Run ID</th><th>Agent</th><th>Status</th><th>Triggered By</th><th>Started</th><th>Duration</th><th>Cost</th><th>Actions</th></tr></thead>
+          <tbody id="runs-tbody"><tr><td colspan="8" class="empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Budgets Section -->
+    <div class="section" id="section-budgets">
+      <div id="budgets-container">
+        <div class="empty"><div class="empty-icon">💰</div>Loading budgets...</div>
+      </div>
+      <div style="margin-top:16px">
+        <button class="btn btn-primary" onclick="openAddBudgetModal()">+ Set Budget</button>
+      </div>
+    </div>
+
+    <!-- Logs Section -->
+    <div class="section" id="section-logs">
+      <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
+        <select id="log-filter-agent" onchange="loadLogs()" style="width:180px">
+          <option value="">All Agents</option>
+        </select>
+        <select id="log-filter-type" onchange="loadLogs()" style="width:160px">
+          <option value="">All Event Types</option>
+          <option value="run_started">run_started</option>
+          <option value="run_completed">run_completed</option>
+          <option value="run_failed">run_failed</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="loadLogs()">↻ Refresh</button>
+      </div>
+      <div id="log-feed"><span style="color:var(--gray)">Loading logs...</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Add/Edit Agent Modal -->
+<div class="modal-overlay" id="agent-modal" style="display:none" onclick="closeAgentModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="agent-modal-title">Add Agent</div>
+      <button class="modal-close" onclick="closeAgentModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="agent-id"/>
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" id="agent-name" placeholder="my-http-agent"/>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <input type="text" id="agent-description" placeholder="What does this agent do?"/>
+      </div>
+      <div class="form-group">
+        <label>Type *</label>
+        <select id="agent-type" onchange="updateConfigPlaceholder()">
+          <option value="http">HTTP - Call a webhook/API endpoint</option>
+          <option value="claude">Claude - Anthropic AI model</option>
+          <option value="openai">OpenAI - GPT model</option>
+          <option value="bash">Bash - Run a shell command</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="agent-status">
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Config (JSON) *</label>
+        <textarea id="agent-config" rows="8" placeholder="{}"></textarea>
+        <div id="config-hint" style="font-size:11px;color:var(--gray);margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeAgentModal()">Cancel</button>
+      <button class="btn btn-primary" id="agent-save-btn" onclick="saveAgent()">Save Agent</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Schedule Modal -->
+<div class="modal-overlay" id="schedule-modal" style="display:none" onclick="closeScheduleModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title">Add Schedule</div>
+      <button class="modal-close" onclick="closeScheduleModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Agent *</label>
+        <select id="schedule-agent-id"></select>
+      </div>
+      <div class="form-group">
+        <label>Cron Expression *</label>
+        <input type="text" id="schedule-cron" placeholder="0 * * * *" value="0 * * * *"/>
+        <div style="font-size:11px;color:var(--gray);margin-top:6px">
+          Examples: <code>0 * * * *</code> (hourly) · <code>0 9 * * *</code> (daily 9am) · <code>*/5 * * * *</code> (every 5 min)
+        </div>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="schedule-enabled" checked style="width:auto"/>
+          Enable immediately
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeScheduleModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSchedule()">Add Schedule</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Budget Modal -->
+<div class="modal-overlay" id="budget-modal" style="display:none" onclick="closeBudgetModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title">Set Budget</div>
+      <button class="modal-close" onclick="closeBudgetModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Agent *</label>
+        <select id="budget-agent-id"></select>
+      </div>
+      <div class="form-group">
+        <label>Period *</label>
+        <select id="budget-period">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly" selected>Monthly</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Limit (USD) *</label>
+        <input type="number" id="budget-limit" placeholder="10.00" min="0.01" step="0.01"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeBudgetModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBudget()">Set Budget</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentSection = 'agents';
+let allAgents = [];
+let runsRefreshTimer = null;
+
+// ── Utilities ──────────────────────────────────────────────────────────
+function api(path, opts={}) {
+  return fetch(API + '/api' + path, {
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': window._apiKey || '' },
+    ...opts
+  }).then(r => {
+    if (!r.ok) return r.json().then(e => { throw new Error(e.error || 'Request failed') });
+    return r.json();
+  });
+}
+
+function fmt(date) {
+  if (!date) return '—';
+  return new Date(date).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function duration(start, end) {
+  if (!start) return '—';
+  const ms = (end ? new Date(end) : new Date()) - new Date(start);
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms/1000).toFixed(1) + 's';
+  return Math.floor(ms/60000) + 'm ' + Math.floor((ms%60000)/1000) + 's';
+}
+
+function badge(value, extra='') {
+  const cls = (value||'').toLowerCase().replace(/[^a-z]/g,'');
+  return `<span class="badge ${cls} ${extra}">${value}</span>`;
+}
+
+function toast(msg, type='info') {
+  const icons = { success:'✅', error:'❌', info:'ℹ️' };
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span class="toast-icon">${icons[type]||'ℹ️'}</span><span class="toast-msg">${msg}</span>`;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => {
+    el.style.animation = 'slideOut .2s ease forwards';
+    setTimeout(() => el.remove(), 200);
+  }, 3500);
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────
+function showSection(name) {
+  currentSection = name;
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => {
+    a.classList.toggle('active', a.dataset.section === name);
+  });
+  document.getElementById(`section-${name}`).classList.add('active');
+
+  const titles = { agents:'Agents', schedules:'Schedules', runs:'Runs', budgets:'Budgets', logs:'Audit Logs' };
+  document.getElementById('page-title').textContent = titles[name] || name;
+
+  const addBtn = document.getElementById('add-btn');
+  addBtn.style.display = name === 'agents' ? '' : 'none';
+
+  if (runsRefreshTimer) { clearInterval(runsRefreshTimer); runsRefreshTimer = null; }
+
+  if (name === 'agents') loadAgents();
+  else if (name === 'schedules') loadSchedules();
+  else if (name === 'runs') { loadRuns(); runsRefreshTimer = setInterval(loadRuns, 10000); }
+  else if (name === 'budgets') loadBudgets();
+  else if (name === 'logs') loadLogs();
+}
+
+function refreshCurrent() { showSection(currentSection); }
+
+// ── Health check ───────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const d = await api('/health');
+    document.getElementById('health-dot').style.background = 'var(--green)';
+    document.getElementById('health-text').textContent = 'Online';
+  } catch {
+    document.getElementById('health-dot').style.background = 'var(--red)';
+    document.getElementById('health-text').textContent = 'Offline';
+  }
+}
+
+// ── Agents ─────────────────────────────────────────────────────────────
+async function loadAgents() {
+  try {
+    const { data } = await api('/agents');
+    allAgents = data;
+    updateAgentFilters(data);
+
+    // Stats
+    document.getElementById('stat-total').textContent = data.length;
+    document.getElementById('stat-active').textContent = data.filter(a=>a.status==='active').length;
+    document.getElementById('stat-paused').textContent = data.filter(a=>a.status==='paused').length;
+    document.getElementById('stat-error').textContent = data.filter(a=>a.status==='error').length;
+
+    const tbody = document.getElementById('agents-tbody');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🤖</div>No agents yet. Click "Add Agent" to create one.</div></td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map(a => `
+      <tr>
+        <td><strong>${esc(a.name)}</strong></td>
+        <td>${badge(a.type)}</td>
+        <td style="color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(a.description||'—')}</td>
+        <td>${badge(a.status)}</td>
+        <td style="color:var(--text2)">${fmt(a.createdAt)}</td>
+        <td><div class="actions">
+          <button class="btn btn-secondary btn-sm" onclick="runAgent('${a.id}','${esc(a.name)}')">▶ Run</button>
+          <button class="btn btn-secondary btn-sm" onclick="editAgent('${a.id}')">✏️</button>
+          ${a.status==='active'
+            ? `<button class="btn btn-secondary btn-sm" onclick="pauseAgent('${a.id}')">⏸</button>`
+            : `<button class="btn btn-success btn-sm" onclick="resumeAgent('${a.id}')">▶</button>`}
+          <button class="btn btn-danger btn-sm" onclick="deleteAgent('${a.id}','${esc(a.name)}')">🗑</button>
+        </div></td>
+      </tr>`).join('');
+  } catch (e) {
+    toast('Failed to load agents: ' + e.message, 'error');
+  }
+}
+
+function updateAgentFilters(agents) {
+  const agentOpts = agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const allOpt = '<option value="">All Agents</option>';
+
+  ['run-filter-agent','log-filter-agent'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = allOpt + agentOpts;
+  });
+  ['schedule-agent-id','budget-agent-id'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = agentOpts;
+  });
+}
+
+async function runAgent(id, name) {
+  try {
+    toast(`Running ${name}...`, 'info');
+    const result = await api(`/agents/${id}/run`, { method:'POST', body: JSON.stringify({}) });
+    const r = result.data;
+    if (r.success) {
+      toast(`✅ ${name} completed (tokens: ${r.tokensUsed}, cost: $${parseFloat(r.costUsd||0).toFixed(4)})`, 'success');
+    } else {
+      toast(`❌ ${name} failed: ${r.error}`, 'error');
+    }
+    if (currentSection === 'runs') loadRuns();
+  } catch(e) {
+    toast('Run failed: ' + e.message, 'error');
+  }
+}
+
+async function pauseAgent(id) {
+  try {
+    await api(`/agents/${id}`, { method:'PUT', body: JSON.stringify({ status:'paused' }) });
+    toast('Agent paused', 'info');
+    loadAgents();
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function resumeAgent(id) {
+  try {
+    await api(`/agents/${id}`, { method:'PUT', body: JSON.stringify({ status:'active' }) });
+    toast('Agent resumed', 'success');
+    loadAgents();
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function deleteAgent(id, name) {
+  if (!confirm(`Delete agent "${name}"? This will remove all associated schedules and data.`)) return;
+  try {
+    await api(`/agents/${id}`, { method:'DELETE' });
+    toast(`Agent "${name}" deleted`, 'success');
+    loadAgents();
+  } catch(e) { toast('Delete failed: '+e.message,'error'); }
+}
+
+async function editAgent(id) {
+  try {
+    const { data } = await api(`/agents/${id}`);
+    document.getElementById('agent-id').value = data.id;
+    document.getElementById('agent-name').value = data.name;
+    document.getElementById('agent-description').value = data.description || '';
+    document.getElementById('agent-type').value = data.type;
+    document.getElementById('agent-status').value = data.status;
+    document.getElementById('agent-config').value = JSON.stringify(data.config, null, 2);
+    document.getElementById('agent-modal-title').textContent = 'Edit Agent';
+    updateConfigPlaceholder();
+    document.getElementById('agent-modal').style.display = 'flex';
+  } catch(e) { toast('Failed to load agent: '+e.message,'error'); }
+}
+
+// ── Agent Modal ────────────────────────────────────────────────────────
+const configExamples = {
+  http: `{\n  "endpoint": "https://your-webhook.example.com/run",\n  "headers": { "Authorization": "Bearer TOKEN" },\n  "timeout": 30000\n}`,
+  claude: `{\n  "model": "claude-3-5-sonnet-20241022",\n  "system_prompt": "You are a helpful assistant.",\n  "max_tokens": 1024\n}`,
+  openai: `{\n  "model": "gpt-4o",\n  "system_prompt": "You are a helpful assistant.",\n  "max_tokens": 1024\n}`,
+  bash: `{\n  "command": "echo \\"Hello from agent \${AGENT_INPUT}\\"",\n  "timeout": 10000\n}`,
+};
+
+const configHints = {
+  http: 'POST JSON to endpoint. Optional: headers, timeout (ms)',
+  claude: 'Uses ANTHROPIC_API_KEY env var. Optional: api_key_override, max_tokens',
+  openai: 'Uses OPENAI_API_KEY env var. Optional: api_key_override, max_tokens',
+  bash: 'Runs shell command. Input available as $AGENT_INPUT env var. Optional: timeout (ms)',
+};
+
+function updateConfigPlaceholder() {
+  const type = document.getElementById('agent-type').value;
+  const configEl = document.getElementById('agent-config');
+  const hintEl = document.getElementById('config-hint');
+  if (!configEl.value || configEl.value === '{}' || configEl.value.trim() === '') {
+    configEl.value = configExamples[type] || '{}';
+  }
+  hintEl.textContent = configHints[type] || '';
+}
+
+function openAddModal() {
+  document.getElementById('agent-id').value = '';
+  document.getElementById('agent-name').value = '';
+  document.getElementById('agent-description').value = '';
+  document.getElementById('agent-type').value = 'http';
+  document.getElementById('agent-status').value = 'active';
+  document.getElementById('agent-config').value = configExamples.http;
+  document.getElementById('config-hint').textContent = configHints.http;
+  document.getElementById('agent-modal-title').textContent = 'Add Agent';
+  document.getElementById('agent-modal').style.display = 'flex';
+}
+
+function closeAgentModal(e) {
+  if (!e || e.target === document.getElementById('agent-modal')) {
+    document.getElementById('agent-modal').style.display = 'none';
+  }
+}
+
+async function saveAgent() {
+  const id = document.getElementById('agent-id').value;
+  const name = document.getElementById('agent-name').value.trim();
+  const description = document.getElementById('agent-description').value.trim();
+  const type = document.getElementById('agent-type').value;
+  const status = document.getElementById('agent-status').value;
+  const configStr = document.getElementById('agent-config').value;
+
+  if (!name) { toast('Name is required', 'error'); return; }
+
+  let config;
+  try { config = JSON.parse(configStr); } catch(e) { toast('Invalid JSON in config field', 'error'); return; }
+
+  const btn = document.getElementById('agent-save-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving...';
+
+  try {
+    const body = { name, description: description||undefined, type, config, status };
+    if (id) {
+      await api(`/agents/${id}`, { method:'PUT', body: JSON.stringify(body) });
+      toast('Agent updated', 'success');
+    } else {
+      await api('/agents', { method:'POST', body: JSON.stringify(body) });
+      toast('Agent created', 'success');
+    }
+    document.getElementById('agent-modal').style.display = 'none';
+    loadAgents();
+  } catch(e) {
+    toast('Save failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Save Agent';
+  }
+}
+
+// ── Schedules ──────────────────────────────────────────────────────────
+async function loadSchedules() {
+  try {
+    if (!allAgents.length) { const {data} = await api('/agents'); allAgents = data; updateAgentFilters(data); }
+    const { data } = await api('/schedules');
+    const tbody = document.getElementById('schedules-tbody');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">⏰</div>No schedules yet.</div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(s => `
+      <tr>
+        <td><strong>${esc(s.agentName)}</strong></td>
+        <td><code class="mono">${esc(s.cronExpression)}</code></td>
+        <td style="color:var(--text2)">${fmt(s.lastRunAt)}</td>
+        <td style="color:var(--text2)">${fmt(s.nextRunAt)}</td>
+        <td>${badge(s.enabled ? 'enabled' : 'paused')}</td>
+        <td><div class="actions">
+          ${s.enabled
+            ? `<button class="btn btn-secondary btn-sm" onclick="disableSchedule('${s.id}')">⏸ Disable</button>`
+            : `<button class="btn btn-success btn-sm" onclick="enableSchedule('${s.id}')">▶ Enable</button>`}
+          <button class="btn btn-danger btn-sm" onclick="deleteSchedule('${s.id}')">🗑</button>
+        </div></td>
+      </tr>`).join('');
+  } catch(e) { toast('Failed to load schedules: '+e.message,'error'); }
+}
+
+function openAddScheduleModal() {
+  if (!allAgents.length) { toast('Load agents first','error'); return; }
+  updateAgentFilters(allAgents);
+  document.getElementById('schedule-cron').value = '0 * * * *';
+  document.getElementById('schedule-enabled').checked = true;
+  document.getElementById('schedule-modal').style.display = 'flex';
+}
+
+function closeScheduleModal(e) {
+  if (!e || e.target === document.getElementById('schedule-modal')) {
+    document.getElementById('schedule-modal').style.display = 'none';
+  }
+}
+
+async function saveSchedule() {
+  const agentId = document.getElementById('schedule-agent-id').value;
+  const cronExpression = document.getElementById('schedule-cron').value.trim();
+  const enabled = document.getElementById('schedule-enabled').checked;
+  if (!agentId || !cronExpression) { toast('Fill all fields','error'); return; }
+  try {
+    await api('/schedules', { method:'POST', body: JSON.stringify({ agentId, cronExpression, enabled }) });
+    toast('Schedule created','success');
+    document.getElementById('schedule-modal').style.display = 'none';
+    loadSchedules();
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function enableSchedule(id) {
+  try { await api(`/schedules/${id}/enable`,{method:'POST'}); toast('Schedule enabled','success'); loadSchedules(); }
+  catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function disableSchedule(id) {
+  try { await api(`/schedules/${id}/disable`,{method:'POST'}); toast('Schedule disabled','info'); loadSchedules(); }
+  catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('Delete this schedule?')) return;
+  try { await api(`/schedules/${id}`,{method:'DELETE'}); toast('Schedule deleted','success'); loadSchedules(); }
+  catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+// ── Runs ───────────────────────────────────────────────────────────────
+async function loadRuns() {
+  try {
+    const status = document.getElementById('run-filter-status').value;
+    const agentId = document.getElementById('run-filter-agent').value;
+    let path = '/runs?limit=50';
+    if (status) path += '&status=' + status;
+    if (agentId) path += '&agentId=' + agentId;
+
+    const { data } = await api(path);
+    const ts = new Date().toLocaleTimeString();
+    document.getElementById('runs-auto-refresh').textContent = `Last updated: ${ts}`;
+
+    const tbody = document.getElementById('runs-tbody');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><div class="empty-icon">▶️</div>No runs found.</div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td class="mono" style="font-size:11px;color:var(--gray)">${r.id.slice(0,8)}…</td>
+        <td><strong>${esc(r.agentName)}</strong><br><span style="font-size:11px;color:var(--gray)">${r.agentType}</span></td>
+        <td>${badge(r.status)}</td>
+        <td><span style="color:var(--text2)">${r.triggeredBy}</span></td>
+        <td style="color:var(--text2)">${fmt(r.startedAt)}</td>
+        <td style="color:var(--text2)">${duration(r.startedAt, r.completedAt)}</td>
+        <td style="color:var(--text2)">$${parseFloat(r.costUsd||0).toFixed(4)}</td>
+        <td><div class="actions">
+          <button class="btn btn-secondary btn-sm" onclick="viewRun('${r.id}')">👁</button>
+          ${(r.status==='pending'||r.status==='running') ? `<button class="btn btn-danger btn-sm" onclick="cancelRun('${r.id}')">✕</button>` : ''}
+        </div></td>
+      </tr>`).join('');
+  } catch(e) { toast('Failed to load runs: '+e.message,'error'); }
+}
+
+async function viewRun(id) {
+  try {
+    const { data } = await api(`/runs/${id}`);
+    const output = data.output ? JSON.stringify(data.output, null, 2) : '(none)';
+    const error = data.error || '';
+    alert(
+      `Run: ${id}\nAgent: ${data.agentName}\nStatus: ${data.status}\nTriggered: ${data.triggeredBy}\n` +
+      `Started: ${fmt(data.startedAt)}\nCompleted: ${fmt(data.completedAt)}\n` +
+      `Tokens: ${data.tokensUsed} | Cost: $${parseFloat(data.costUsd||0).toFixed(6)}\n\n` +
+      (error ? `Error:\n${error}\n\n` : '') +
+      `Output:\n${output.slice(0,800)}`
+    );
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function cancelRun(id) {
+  if (!confirm('Cancel this run?')) return;
+  try { await api(`/runs/${id}`,{method:'DELETE'}); toast('Run cancelled','info'); loadRuns(); }
+  catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+// ── Budgets ────────────────────────────────────────────────────────────
+async function loadBudgets() {
+  try {
+    if (!allAgents.length) { const {data} = await api('/agents'); allAgents = data; updateAgentFilters(data); }
+    const { data } = await api('/budgets');
+    const container = document.getElementById('budgets-container');
+
+    if (!data.length) {
+      container.innerHTML = '<div class="empty"><div class="empty-icon">💰</div>No budgets configured. Click "Set Budget" to add one.</div>';
+      return;
+    }
+
+    container.innerHTML = data.map(b => {
+      const limit = parseFloat(b.limitUsd);
+      const spend = parseFloat(b.currentSpend);
+      const pct = limit > 0 ? Math.min(100, (spend/limit)*100) : 0;
+      const fillClass = pct > 90 ? 'danger' : pct > 70 ? 'warn' : '';
+      return `
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <div>
+              <div class="card-title">${esc(b.agentName)}</div>
+              <div style="font-size:12px;color:var(--gray)">${b.agentType} · ${b.period} budget</div>
+            </div>
+            <div class="actions">
+              <button class="btn btn-secondary btn-sm" onclick="resetBudget('${b.agentId}','${esc(b.agentName)}')">↺ Reset</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteBudget('${b.id}')">🗑</button>
+            </div>
+          </div>
+          <div class="progress-wrap">
+            <div class="progress-label">
+              <span>$${spend.toFixed(4)} spent</span>
+              <span style="font-weight:600;color:${pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--text)'}">${pct.toFixed(1)}% of $${limit.toFixed(2)}</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
+            </div>
+            <div style="font-size:11px;color:var(--gray);margin-top:4px">
+              $${Math.max(0,limit-spend).toFixed(4)} remaining · Period started ${fmt(b.periodStart)}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  } catch(e) { toast('Failed to load budgets: '+e.message,'error'); }
+}
+
+function openAddBudgetModal() {
+  if (!allAgents.length) { toast('No agents available','error'); return; }
+  updateAgentFilters(allAgents);
+  document.getElementById('budget-limit').value = '';
+  document.getElementById('budget-period').value = 'monthly';
+  document.getElementById('budget-modal').style.display = 'flex';
+}
+
+function closeBudgetModal(e) {
+  if (!e || e.target === document.getElementById('budget-modal')) {
+    document.getElementById('budget-modal').style.display = 'none';
+  }
+}
+
+async function saveBudget() {
+  const agentId = document.getElementById('budget-agent-id').value;
+  const period = document.getElementById('budget-period').value;
+  const limitUsd = parseFloat(document.getElementById('budget-limit').value);
+  if (!agentId || !period || isNaN(limitUsd) || limitUsd <= 0) {
+    toast('Fill all fields with valid values','error'); return;
+  }
+  try {
+    await api('/budgets',{method:'POST',body:JSON.stringify({agentId,period,limitUsd})});
+    toast('Budget set','success');
+    document.getElementById('budget-modal').style.display = 'none';
+    loadBudgets();
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function resetBudget(agentId, name) {
+  if (!confirm(`Reset budget spend to $0 for "${name}"?`)) return;
+  try {
+    await api(`/budgets/${agentId}/reset`,{method:'POST'});
+    toast('Budget reset','success');
+    loadBudgets();
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+async function deleteBudget(id) {
+  if (!confirm('Remove this budget?')) return;
+  try {
+    await api(`/budgets/${id}`,{method:'DELETE'});
+    toast('Budget removed','success');
+    loadBudgets();
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+// ── Logs ───────────────────────────────────────────────────────────────
+async function loadLogs() {
+  try {
+    if (!allAgents.length) { const {data} = await api('/agents'); allAgents = data; updateAgentFilters(data); }
+    const agentId = document.getElementById('log-filter-agent').value;
+    const eventType = document.getElementById('log-filter-type').value;
+
+    // Fetch runs to get audit logs indirectly
+    let path = '/runs?limit=30';
+    if (agentId) path += '&agentId=' + agentId;
+
+    const { data: recentRuns } = await api(path);
+    const feed = document.getElementById('log-feed');
+
+    if (!recentRuns.length) {
+      feed.innerHTML = '<span style="color:var(--gray)">No recent runs found.</span>';
+      return;
+    }
+
+    const entries = recentRuns.map(r => {
+      const ts = new Date(r.startedAt).toLocaleTimeString();
+      const statusType = r.status === 'success' ? 'run_completed' : r.status === 'failed' ? 'run_failed' : 'run_started';
+      if (eventType && statusType !== eventType) return '';
+      const cost = parseFloat(r.costUsd||0) > 0 ? ` · $${parseFloat(r.costUsd).toFixed(4)}` : '';
+      const dur = r.completedAt ? ` · ${duration(r.startedAt,r.completedAt)}` : '';
+      return `<div class="log-entry">
+        <span class="log-ts">${fmt(r.startedAt)}</span>
+        <span class="log-type ${statusType}">[${r.status.toUpperCase()}]</span>
+        <strong>${esc(r.agentName)}</strong>
+        <span style="color:var(--gray)"> via ${r.triggeredBy}${dur}${cost}</span>
+        ${r.error ? `<br><span style="color:var(--red);margin-left:120px">Error: ${esc(r.error.slice(0,120))}</span>` : ''}
+      </div>`;
+    }).filter(Boolean);
+
+    feed.innerHTML = entries.length
+      ? entries.join('')
+      : '<span style="color:var(--gray)">No log entries match filter.</span>';
+  } catch(e) { toast('Failed to load logs: '+e.message,'error'); }
+}
+
+// ── Escape HTML ────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+checkHealth();
+setInterval(checkHealth, 30000);
+loadAgents();
+
+// Keyboard shortcut: Escape closes modals
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('agent-modal').style.display = 'none';
+    document.getElementById('schedule-modal').style.display = 'none';
+    document.getElementById('budget-modal').style.display = 'none';
+  }
+});
+</script>
+</body>
+</html>
