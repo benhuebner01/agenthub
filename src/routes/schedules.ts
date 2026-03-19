@@ -99,6 +99,7 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
+    const now = new Date().toISOString();
     const [newSchedule] = await db
       .insert(schedules)
       .values({
@@ -106,8 +107,8 @@ router.post('/', async (req: Request, res: Response) => {
         agentId,
         cronExpression,
         enabled,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
       })
       .returning();
 
@@ -145,7 +146,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     const [updated] = await db
       .update(schedules)
-      .set({ ...parsed.data, updatedAt: new Date() })
+      .set({ ...parsed.data, updatedAt: new Date().toISOString() })
       .where(eq(schedules.id, req.params.id))
       .returning();
 
@@ -200,7 +201,7 @@ router.post('/:id/enable', async (req: Request, res: Response) => {
 
     const [updated] = await db
       .update(schedules)
-      .set({ enabled: true, updatedAt: new Date() })
+      .set({ enabled: true, updatedAt: new Date().toISOString() })
       .where(eq(schedules.id, req.params.id))
       .returning();
 
@@ -226,13 +227,13 @@ router.post('/:id/disable', async (req: Request, res: Response) => {
   try {
     const [existing] = await db.select().from(schedules).where(eq(schedules.id, req.params.id));
     if (!existing) {
-      res.status(404).json({ error: 'Schedule not found' });
+      res.status(404).json({ error: 'Schedule not disabled' });
       return;
     }
 
     const [updated] = await db
       .update(schedules)
-      .set({ enabled: false, updatedAt: new Date() })
+      .set({ enabled: false, updatedAt: new Date().toISOString() })
       .where(eq(schedules.id, req.params.id))
       .returning();
 

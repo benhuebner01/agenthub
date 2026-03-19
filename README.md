@@ -1,44 +1,36 @@
-# ⚡ AgentHub
+# AgentHub
 
 AI Agent Orchestration Platform — a self-hosted alternative to Paperclip AI. Manage, schedule, and monitor HTTP, Claude, OpenAI, and Bash agents from a single dashboard.
 
+**No PostgreSQL. No Redis. Just Node.js + SQLite.**
+Data is stored in `./data/agenthub.db` (auto-created).
+
 ---
 
-## Quick Start (Docker)
+## Deployment
 
+### Option 1: VPS (Recommended — no Docker needed)
 ```bash
-# 1. Clone and copy env
-cp .env.example .env
-# Edit .env with your API keys
-
-# 2. Start everything
-docker-compose up --build
-
-# 3. Open dashboard
-open http://localhost:3000
+git clone https://github.com/benhuebner01/agenthub.git
+cd agenthub
+cp .env.example .env   # edit with your API keys
+chmod +x deploy.sh
+./deploy.sh            # installs, builds, starts with PM2
 ```
+Dashboard: http://your-server-ip:3000
 
----
-
-## Manual Install
-
+### Option 2: Docker (single container, no dependencies)
 ```bash
-# Prerequisites: Node 20+, PostgreSQL 16, Redis 7
+cp .env.example .env   # edit first
+docker-compose up -d
+```
+Dashboard: http://localhost:3000
 
-npm install
-
-# Set up environment
-cp .env.example .env
-# Edit DATABASE_URL and REDIS_URL in .env
-
-# Run database migrations
+### Option 3: Local Development
+```bash
+npm install && cd client && npm install && cd ..
 npm run migrate
-
-# Start development server
-npm run dev
-
-# Or build and run production
-npm run build && npm start
+npm run dev:all        # API on :3000, Vite on :5173
 ```
 
 ---
@@ -47,10 +39,9 @@ npm run build && npm start
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `REDIS_URL` | Yes | Redis connection string |
 | `PORT` | No | HTTP server port (default: 3000) |
 | `NODE_ENV` | No | `development` or `production` |
+| `DATA_DIR` | No | Directory for SQLite DB (default: `./data`) |
 | `API_SECRET` | No | X-API-Key header value for mutation endpoints |
 | `TELEGRAM_BOT_TOKEN` | No | BotFather token to enable Telegram bot |
 | `TELEGRAM_AUTHORIZED_USERS` | No | Comma-separated Telegram user IDs |
@@ -185,12 +176,12 @@ Environment variables available inside the command:
 │  Static Dashboard          ┌──────┴──────┐          │
 │                            │             │           │
 │                       Executor      Scheduler        │
-│                       (runs agents)  (BullMQ/Redis)  │
+│                       (runs agents)  (node-cron)     │
 │                            │             │           │
 │                       Budget        Telegram Bot     │
 │                       Tracker       (grammy)         │
 │                            │                         │
-│                       PostgreSQL (Drizzle ORM)       │
+│                       SQLite (Drizzle ORM)          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -213,8 +204,9 @@ npm run seed
 ```
 
 The project uses:
-- **Drizzle ORM** for type-safe PostgreSQL queries
-- **BullMQ** for reliable cron-based job scheduling
+- **Drizzle ORM** for type-safe SQLite queries
+- **better-sqlite3** for fast embedded database
+- **node-cron** for cron-based job scheduling
 - **grammy** for the Telegram bot
 - **Zod** for request validation
 - **Express** for the REST API

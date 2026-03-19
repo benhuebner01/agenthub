@@ -56,6 +56,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const { name, description, type, config, status } = parsed.data;
+    const now = new Date().toISOString();
 
     const [newAgent] = await db
       .insert(agents)
@@ -66,8 +67,8 @@ router.post('/', async (req: Request, res: Response) => {
         type,
         config,
         status,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
       })
       .returning();
 
@@ -95,7 +96,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     const [updated] = await db
       .update(agents)
-      .set({ ...parsed.data, updatedAt: new Date() })
+      .set({ ...parsed.data, updatedAt: new Date().toISOString() })
       .where(eq(agents.id, req.params.id))
       .returning();
 

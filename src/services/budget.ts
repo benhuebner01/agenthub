@@ -10,7 +10,7 @@ export interface BudgetCheckResult {
   currentSpend: number;
 }
 
-function getPeriodEndDate(periodStart: Date, period: 'daily' | 'weekly' | 'monthly'): Date {
+function getPeriodEndDate(periodStart: string | Date, period: 'daily' | 'weekly' | 'monthly'): Date {
   const end = new Date(periodStart);
   switch (period) {
     case 'daily':
@@ -34,12 +34,12 @@ export async function checkBudget(agentId: string): Promise<BudgetCheckResult> {
     return { allowed: true, remaining: Infinity, limit: Infinity, currentSpend: 0 };
   }
 
-  const limit = parseFloat(budget.limitUsd as string);
-  const currentSpend = parseFloat(budget.currentSpend as string);
+  const limit = budget.limitUsd as number;
+  const currentSpend = budget.currentSpend as number;
   const remaining = Math.max(0, limit - currentSpend);
 
   // Check if period has expired and needs reset
-  const periodEnd = getPeriodEndDate(budget.periodStart, budget.period);
+  const periodEnd = getPeriodEndDate(budget.periodStart!, budget.period as 'daily' | 'weekly' | 'monthly');
   if (new Date() > periodEnd) {
     await resetBudget(agentId);
     return { allowed: true, remaining: limit, limit, currentSpend: 0 };
@@ -60,14 +60,14 @@ export async function recordSpend(agentId: string, costUsd: number): Promise<voi
 
   if (!budget) return;
 
-  const currentSpend = parseFloat(budget.currentSpend as string);
+  const currentSpend = budget.currentSpend as number;
   const newSpend = currentSpend + costUsd;
 
   await db
     .update(budgets)
     .set({
-      currentSpend: newSpend.toFixed(6),
-      updatedAt: new Date(),
+      currentSpend: newSpend,
+      updatedAt: new Date().toISOString(),
     })
     .where(eq(budgets.agentId, agentId));
 }
@@ -76,9 +76,9 @@ export async function resetBudget(agentId: string): Promise<void> {
   await db
     .update(budgets)
     .set({
-      currentSpend: '0',
-      periodStart: new Date(),
-      updatedAt: new Date(),
+      currentSpend: 0,
+      periodStart: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     .where(eq(budgets.agentId, agentId));
 }
@@ -87,7 +87,7 @@ export async function resetExpiredBudgets(): Promise<void> {
   const allBudgets = await db.select().from(budgets);
 
   for (const budget of allBudgets) {
-    const periodEnd = getPeriodEndDate(budget.periodStart, budget.period);
+    const periodEnd = getPeriodEndDate(budget.periodStart!, budget.period as 'daily' | 'weekly' | 'monthly');
     if (new Date() > periodEnd) {
       await resetBudget(budget.agentId);
       console.log(`[Budget] Reset expired budget for agent ${budget.agentId} (period: ${budget.period})`);
@@ -107,8 +107,8 @@ export async function createOrUpdateBudget(
       .update(budgets)
       .set({
         period,
-        limitUsd: limitUsd.toFixed(2),
-        updatedAt: new Date(),
+        limitUsd,
+        updatedAt: new Date().toISOString(),
       })
       .where(eq(budgets.agentId, agentId));
   } else {
@@ -116,9 +116,9 @@ export async function createOrUpdateBudget(
       id: uuidv4(),
       agentId,
       period,
-      limitUsd: limitUsd.toFixed(2),
-      currentSpend: '0',
-      periodStart: new Date(),
+      limitUsd,
+      currentSpend: 0,
+      periodStart: new Date().toISOString(),
     });
   }
 }

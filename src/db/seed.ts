@@ -10,6 +10,7 @@ async function seed() {
   const httpAgentId = uuidv4();
   const claudeAgentId = uuidv4();
   const bashAgentId = uuidv4();
+  const now = new Date().toISOString();
 
   console.log('Creating example agents...');
 
@@ -25,8 +26,8 @@ async function seed() {
         timeout: 10000,
       },
       status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     },
     {
       id: claudeAgentId,
@@ -39,8 +40,8 @@ async function seed() {
         max_tokens: 512,
       },
       status: 'paused',
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     },
     {
       id: bashAgentId,
@@ -52,8 +53,8 @@ async function seed() {
         timeout: 5000,
       },
       status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     },
   ]).onConflictDoNothing();
 
@@ -65,16 +66,16 @@ async function seed() {
       agentId: httpAgentId,
       cronExpression: '0 * * * *',
       enabled: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     },
     {
       id: uuidv4(),
       agentId: bashAgentId,
       cronExpression: '*/30 * * * *',
       enabled: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     },
   ]).onConflictDoNothing();
 
@@ -85,21 +86,21 @@ async function seed() {
       id: uuidv4(),
       agentId: claudeAgentId,
       period: 'monthly',
-      limitUsd: '10.00',
-      currentSpend: '0.542100',
-      periodStart: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      limitUsd: 10.00,
+      currentSpend: 0.5421,
+      periodStart: now,
+      createdAt: now,
+      updatedAt: now,
     },
     {
       id: uuidv4(),
       agentId: httpAgentId,
       period: 'daily',
-      limitUsd: '1.00',
-      currentSpend: '0.000000',
-      periodStart: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      limitUsd: 1.00,
+      currentSpend: 0,
+      periodStart: now,
+      createdAt: now,
+      updatedAt: now,
     },
   ]).onConflictDoNothing();
 

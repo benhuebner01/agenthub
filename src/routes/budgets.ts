@@ -66,8 +66,8 @@ router.get('/:agentId', async (req: Request, res: Response) => {
       return;
     }
 
-    const limit = parseFloat(budget.limitUsd as string);
-    const spend = parseFloat(budget.currentSpend as string);
+    const limit = budget.limitUsd as number;
+    const spend = budget.currentSpend as number;
     const percentUsed = limit > 0 ? (spend / limit) * 100 : 0;
 
     res.json({

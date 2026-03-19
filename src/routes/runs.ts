@@ -118,7 +118,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     await db
       .update(runs)
-      .set({ status: 'cancelled', completedAt: new Date() })
+      .set({ status: 'cancelled', completedAt: new Date().toISOString() })
       .where(eq(runs.id, req.params.id));
 
     res.json({ message: 'Run cancelled successfully' });

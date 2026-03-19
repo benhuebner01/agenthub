@@ -165,6 +165,7 @@ export async function executeAgent(
 ): Promise<ExecutionResult> {
   // Create run record
   const runId = uuidv4();
+  const startedAt = new Date().toISOString();
   const [agentRecord] = await db.select().from(agents).where(eq(agents.id, agentId));
 
   if (!agentRecord) {
@@ -176,11 +177,12 @@ export async function executeAgent(
     id: runId,
     agentId,
     status: 'running',
-    startedAt: new Date(),
+    startedAt,
     input: input as Record<string, unknown>,
     triggeredBy,
     tokensUsed: 0,
-    costUsd: '0',
+    costUsd: 0,
+    createdAt: startedAt,
   });
 
   // Log run start
@@ -190,6 +192,7 @@ export async function executeAgent(
     agentId,
     eventType: 'run_started',
     data: { triggeredBy, input },
+    createdAt: new Date().toISOString(),
   });
 
   const config = agentRecord.config as Record<string, unknown>;
@@ -213,19 +216,22 @@ export async function executeAgent(
         throw new Error(`Unknown agent type: ${agentRecord.type}`);
     }
 
+    const completedAt = new Date().toISOString();
+
     // Update run as success
     await db
       .update(runs)
       .set({
         status: 'success',
-        completedAt: new Date(),
+        completedAt,
         output: result.output as Record<string, unknown>,
         tokensUsed: result.tokensUsed,
-        costUsd: result.costUsd.toFixed(6),
+        costUsd: result.costUsd,
       })
       .where(eq(runs.id, runId));
 
     // Log success
+    const agentCreatedAt = agentRecord.createdAt ? new Date(agentRecord.createdAt).getTime() : Date.now();
     await db.insert(auditLogs).values({
       id: uuidv4(),
       runId,
@@ -234,20 +240,23 @@ export async function executeAgent(
       data: {
         tokensUsed: result.tokensUsed,
         costUsd: result.costUsd,
-        durationMs: Date.now() - agentRecord.createdAt.getTime(),
+        durationMs: Date.now() - agentCreatedAt,
       },
+      createdAt: new Date().toISOString(),
     });
 
     return result;
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
 
+    const completedAt = new Date().toISOString();
+
     // Update run as failed
     await db
       .update(runs)
       .set({
         status: 'failed',
-        completedAt: new Date(),
+        completedAt,
         error: errorMessage,
       })
       .where(eq(runs.id, runId));
@@ -259,12 +268,13 @@ export async function executeAgent(
       agentId,
       eventType: 'run_failed',
       data: { error: errorMessage },
+      createdAt: new Date().toISOString(),
     });
 
     // Update agent status to error
     await db
       .update(agents)
-      .set({ status: 'error', updatedAt: new Date() })
+      .set({ status: 'error', updatedAt: new Date().toISOString() })
       .where(eq(agents.id, agentId));
 
     return {

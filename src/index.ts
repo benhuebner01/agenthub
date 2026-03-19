@@ -103,53 +103,121 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 
 async function main() {
   console.log('='.repeat(60));
-  console.log('⚡ AgentHub - AI Agent Orchestration Platform');
+  console.log('AgentHub - AI Agent Orchestration Platform');
   console.log('='.repeat(60));
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Database: ${process.env.DATABASE_URL?.replace(/:\/\/.*@/, '://***@') || 'not configured'}`);
-  console.log(`Redis: ${process.env.REDIS_URL || 'not configured'}`);
+  console.log(`Data directory: ${process.env.DATA_DIR || './data'}`);
 
-  // Run migrations on startup
+  // Run migrations on startup using SQLite directly
   console.log('\n[DB] Running migrations...');
   try {
-    const { execSync } = require('child_process');
-    // Import and run migration directly
-    const { Pool } = require('pg');
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-    const client = await pool.connect();
+    const { sqlite } = await import('./db/index');
+    const tableCheck = sqlite.prepare(
+      `SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='agents'`
+    ).get() as { count: number };
 
-    try {
-      // Quick check if tables exist
-      const result = await client.query(`
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'agents'
-      `);
-      const tablesExist = parseInt(result.rows[0].count, 10) > 0;
-
-      if (!tablesExist) {
-        console.log('[DB] Tables not found, running migration...');
-        // Dynamically import and run migration
-        require('./db/migrate');
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      } else {
-        console.log('[DB] Tables already exist, skipping migration');
-      }
-    } finally {
-      client.release();
-      await pool.end();
+    if (tableCheck.count === 0) {
+      console.log('[DB] Tables not found, running migration...');
+      const { default: migrateFn } = await import('./db/migrate');
+    } else {
+      console.log('[DB] Tables already exist, skipping migration');
     }
   } catch (err) {
-    console.warn('[DB] Migration check failed (this is normal on first run):', (err as Error).message);
-    console.warn('[DB] Run `npm run migrate` manually if needed');
+    // Tables may not exist yet — run migrate script directly
+    console.log('[DB] Running initial migration...');
+    try {
+      const { sqlite } = await import('./db/index');
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS agents (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          type TEXT NOT NULL,
+          config TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS schedules (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          cron_expression TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_run_at TEXT,
+          next_run_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          schedule_id TEXT REFERENCES schedules(id) ON DELETE SET NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          input TEXT,
+          output TEXT,
+          error TEXT,
+          tokens_used INTEGER NOT NULL DEFAULT 0,
+          cost_usd REAL NOT NULL DEFAULT 0,
+          triggered_by TEXT NOT NULL DEFAULT 'manual',
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS budgets (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+          period TEXT NOT NULL DEFAULT 'monthly',
+          limit_usd REAL NOT NULL,
+          current_spend REAL NOT NULL DEFAULT 0,
+          period_start TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL,
+          data TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tool_calls (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+          tool_name TEXT NOT NULL,
+          input TEXT,
+          output TEXT,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS telegram_users (
+          id TEXT PRIMARY KEY,
+          telegram_id INTEGER NOT NULL UNIQUE,
+          username TEXT,
+          first_name TEXT,
+          authorized INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_runs_agent_id ON runs(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+        CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_agent_id ON audit_logs(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_run_id ON audit_logs(run_id);
+        CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_run_id ON tool_calls(run_id);
+      `);
+      console.log('[DB] Migration complete');
+    } catch (migrateErr) {
+      console.warn('[DB] Migration error (tables may already exist):', (migrateErr as Error).message);
+    }
   }
 
-  // Start BullMQ scheduler
+  // Start node-cron scheduler
   console.log('\n[Scheduler] Starting...');
   try {
     await startScheduler();
   } catch (err) {
     console.error('[Scheduler] Failed to start:', (err as Error).message);
-    console.warn('[Scheduler] Scheduler disabled - check Redis connection');
   }
 
   // Start Telegram bot
@@ -176,7 +244,7 @@ async function main() {
   // Start HTTP server
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('\n' + '='.repeat(60));
-    console.log(`✅ AgentHub running at http://0.0.0.0:${PORT}`);
+    console.log(`AgentHub running at http://0.0.0.0:${PORT}`);
     console.log(`   Dashboard: http://localhost:${PORT}`);
     console.log(`   API:       http://localhost:${PORT}/api`);
     console.log(`   Health:    http://localhost:${PORT}/api/health`);

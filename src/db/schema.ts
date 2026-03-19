@@ -1,118 +1,88 @@
-import {
-  pgTable,
-  uuid,
-  varchar,
-  text,
-  timestamp,
-  boolean,
-  jsonb,
-  integer,
-  numeric,
-  bigint,
-  pgEnum,
-} from 'drizzle-orm/pg-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 
-// Enums
-export const agentTypeEnum = pgEnum('agent_type', ['http', 'claude', 'openai', 'bash']);
-export const agentStatusEnum = pgEnum('agent_status', ['active', 'paused', 'error']);
-export const runStatusEnum = pgEnum('run_status', ['pending', 'running', 'success', 'failed', 'cancelled']);
-export const triggeredByEnum = pgEnum('triggered_by', ['schedule', 'manual', 'telegram', 'api']);
-export const budgetPeriodEnum = pgEnum('budget_period', ['daily', 'weekly', 'monthly']);
-
 // Agents table
-export const agents = pgTable('agents', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 255 }).notNull(),
+export const agents = sqliteTable('agents', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
   description: text('description'),
-  type: agentTypeEnum('type').notNull(),
-  config: jsonb('config').notNull().default({}),
-  status: agentStatusEnum('status').notNull().default('active'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  type: text('type').notNull(), // 'http' | 'claude' | 'openai' | 'bash'
+  config: text('config', { mode: 'json' }).notNull().default('{}'),
+  status: text('status').notNull().default('active'), // 'active' | 'paused' | 'error'
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Schedules table
-export const schedules = pgTable('schedules', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  agentId: uuid('agent_id')
-    .notNull()
-    .references(() => agents.id, { onDelete: 'cascade' }),
-  cronExpression: varchar('cron_expression', { length: 255 }).notNull(),
-  enabled: boolean('enabled').notNull().default(true),
-  lastRunAt: timestamp('last_run_at'),
-  nextRunAt: timestamp('next_run_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+export const schedules = sqliteTable('schedules', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  cronExpression: text('cron_expression').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  lastRunAt: text('last_run_at'),
+  nextRunAt: text('next_run_at'),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Runs table
-export const runs = pgTable('runs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  agentId: uuid('agent_id')
-    .notNull()
-    .references(() => agents.id, { onDelete: 'cascade' }),
-  scheduleId: uuid('schedule_id').references(() => schedules.id, { onDelete: 'set null' }),
-  status: runStatusEnum('status').notNull().default('pending'),
-  startedAt: timestamp('started_at').notNull().defaultNow(),
-  completedAt: timestamp('completed_at'),
-  input: jsonb('input'),
-  output: jsonb('output'),
+export const runs = sqliteTable('runs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  scheduleId: text('schedule_id').references(() => schedules.id, { onDelete: 'set null' }),
+  status: text('status').notNull().default('pending'), // 'pending'|'running'|'success'|'failed'|'cancelled'
+  startedAt: text('started_at').$defaultFn(() => new Date().toISOString()),
+  completedAt: text('completed_at'),
+  input: text('input', { mode: 'json' }),
+  output: text('output', { mode: 'json' }),
   error: text('error'),
   tokensUsed: integer('tokens_used').notNull().default(0),
-  costUsd: numeric('cost_usd', { precision: 10, scale: 6 }).notNull().default('0'),
-  triggeredBy: triggeredByEnum('triggered_by').notNull().default('manual'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  costUsd: real('cost_usd').notNull().default(0),
+  triggeredBy: text('triggered_by').notNull().default('manual'), // 'schedule'|'manual'|'telegram'|'api'
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Budgets table
-export const budgets = pgTable('budgets', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  agentId: uuid('agent_id')
-    .notNull()
-    .unique()
-    .references(() => agents.id, { onDelete: 'cascade' }),
-  period: budgetPeriodEnum('period').notNull().default('monthly'),
-  limitUsd: numeric('limit_usd', { precision: 10, scale: 2 }).notNull(),
-  currentSpend: numeric('current_spend', { precision: 10, scale: 6 }).notNull().default('0'),
-  periodStart: timestamp('period_start').notNull().defaultNow(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+export const budgets = sqliteTable('budgets', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  agentId: text('agent_id').notNull().unique().references(() => agents.id, { onDelete: 'cascade' }),
+  period: text('period').notNull().default('monthly'), // 'daily'|'weekly'|'monthly'
+  limitUsd: real('limit_usd').notNull(),
+  currentSpend: real('current_spend').notNull().default(0),
+  periodStart: text('period_start').$defaultFn(() => new Date().toISOString()),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Audit logs table
-export const auditLogs = pgTable('audit_logs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  runId: uuid('run_id').references(() => runs.id, { onDelete: 'set null' }),
-  agentId: uuid('agent_id')
-    .notNull()
-    .references(() => agents.id, { onDelete: 'cascade' }),
-  eventType: varchar('event_type', { length: 255 }).notNull(),
-  data: jsonb('data').notNull().default({}),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+export const auditLogs = sqliteTable('audit_logs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  runId: text('run_id').references(() => runs.id, { onDelete: 'set null' }),
+  agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(),
+  data: text('data', { mode: 'json' }),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Tool calls table
-export const toolCalls = pgTable('tool_calls', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  runId: uuid('run_id')
-    .notNull()
-    .references(() => runs.id, { onDelete: 'cascade' }),
-  toolName: varchar('tool_name', { length: 255 }).notNull(),
-  input: jsonb('input'),
-  output: jsonb('output'),
+export const toolCalls = sqliteTable('tool_calls', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  runId: text('run_id').notNull().references(() => runs.id, { onDelete: 'cascade' }),
+  toolName: text('tool_name').notNull(),
+  input: text('input', { mode: 'json' }),
+  output: text('output', { mode: 'json' }),
   durationMs: integer('duration_ms').notNull().default(0),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Telegram users table
-export const telegramUsers = pgTable('telegram_users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  telegramId: bigint('telegram_id', { mode: 'number' }).notNull().unique(),
-  username: varchar('username', { length: 255 }),
-  firstName: varchar('first_name', { length: 255 }),
-  authorized: boolean('authorized').notNull().default(false),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+export const telegramUsers = sqliteTable('telegram_users', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  telegramId: integer('telegram_id').notNull().unique(),
+  username: text('username'),
+  firstName: text('first_name'),
+  authorized: integer('authorized', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 });
 
 // Relations

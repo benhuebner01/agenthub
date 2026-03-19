@@ -48,6 +48,7 @@ async function upsertTelegramUser(ctx: Context): Promise<void> {
       username: ctx.from?.username || null,
       firstName: ctx.from?.first_name || null,
       authorized: authorizedUserIds.has(userId),
+      createdAt: new Date().toISOString(),
     });
   }
 }
@@ -66,9 +67,9 @@ function formatStatus(status: string): string {
   return `${icons[status] || '❓'} ${status}`;
 }
 
-function formatDuration(startedAt: Date, completedAt: Date | null): string {
-  if (!completedAt) return 'running...';
-  const ms = completedAt.getTime() - startedAt.getTime();
+function formatDuration(startedAt: string | null, completedAt: string | null): string {
+  if (!completedAt || !startedAt) return 'running...';
+  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
@@ -303,8 +304,8 @@ export async function startTelegramBot(): Promise<void> {
     }
 
     const lines = filteredBudgets.map((b) => {
-      const limit = parseFloat(b.limitUsd as string);
-      const spend = parseFloat(b.currentSpend as string);
+      const limit = b.limitUsd as number;
+      const spend = b.currentSpend as number;
       const pct = limit > 0 ? ((spend / limit) * 100).toFixed(1) : '0';
       const bar = '█'.repeat(Math.min(10, Math.round((spend / limit) * 10))) + '░'.repeat(Math.max(0, 10 - Math.round((spend / limit) * 10)));
       return `*${b.agentName}* (${b.period})\n${bar} ${pct}%\n$${spend.toFixed(4)} / $${limit.toFixed(2)}`;
@@ -368,7 +369,7 @@ export async function startTelegramBot(): Promise<void> {
     const lines = recentRuns.map(
       (r) =>
         `${formatStatus(r.status)} *${r.agentName}*\n` +
-        `  ${r.triggeredBy} | ${formatDuration(r.startedAt, r.completedAt)} | $${parseFloat(r.costUsd as string).toFixed(4)}`
+        `  ${r.triggeredBy} | ${formatDuration(r.startedAt, r.completedAt)} | $${(r.costUsd as number).toFixed(4)}`
     );
 
     await ctx.reply(
@@ -403,7 +404,7 @@ export async function startTelegramBot(): Promise<void> {
     // Update agent status
     await db
       .update(agents)
-      .set({ status: 'paused', updatedAt: new Date() })
+      .set({ status: 'paused', updatedAt: new Date().toISOString() })
       .where(eq(agents.id, agent.id));
 
     // Disable all schedules
@@ -445,7 +446,7 @@ export async function startTelegramBot(): Promise<void> {
     // Update agent status
     await db
       .update(agents)
-      .set({ status: 'active', updatedAt: new Date() })
+      .set({ status: 'active', updatedAt: new Date().toISOString() })
       .where(eq(agents.id, agent.id));
 
     // Re-enable schedules

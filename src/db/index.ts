@@ -1,17 +1,20 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
+import path from 'path';
+import fs from 'fs';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+const dataDir = process.env.DATA_DIR || './data';
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 
-pool.on('error', (err) => {
-  console.error('Unexpected PostgreSQL pool error:', err);
-});
+const dbPath = path.join(dataDir, 'agenthub.db');
+const sqlite = new Database(dbPath);
 
-export const db = drizzle(pool, { schema });
-export { pool };
+// Enable WAL mode for better concurrent read performance
+sqlite.pragma('journal_mode = WAL');
+sqlite.pragma('foreign_keys = ON');
+
+export const db = drizzle(sqlite, { schema });
+export { sqlite };
