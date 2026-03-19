@@ -26,6 +26,9 @@ import {
   saveTelegramConfig,
   testTelegram,
   createAgent,
+  getPresets,
+  discoverOpenclaw,
+  AgentPreset,
 } from '../api/client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -382,7 +385,7 @@ function StepProviders({
           </div>
           <div className="flex-1">
             <p className="text-sm font-semibold text-slate-200">Anthropic Claude</p>
-            <p className="text-xs text-slate-500">claude-3-5-sonnet and family</p>
+            <p className="text-xs text-slate-500">claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5</p>
           </div>
           <StatusIcon status={anthropicStatus} />
           {anthropicStatus === 'ok' && (
@@ -414,7 +417,7 @@ function StepProviders({
           </div>
           <div className="flex-1">
             <p className="text-sm font-semibold text-slate-200">OpenAI</p>
-            <p className="text-xs text-slate-500">GPT-4o and family</p>
+            <p className="text-xs text-slate-500">gpt-5.4-pro, gpt-4o, o3, o4-mini and more</p>
           </div>
           <StatusIcon status={openaiStatus} />
           {openaiStatus === 'ok' && (
@@ -597,6 +600,205 @@ function StepTelegram({
   )
 }
 
+// ─── Step 3.5: Connect Local Agents ──────────────────────────────────────────
+
+type CLIStatus = 'unknown' | 'checking' | 'available' | 'not-found'
+
+interface LocalAgentState {
+  claudeCode: CLIStatus
+  codex: CLIStatus
+  openclaw: CLIStatus
+  openclawVersion: string
+}
+
+function StepLocalAgents({
+  onNext,
+  onBack,
+}: {
+  onNext: () => void
+  onBack: () => void
+}) {
+  const [state, setState] = useState<LocalAgentState>({
+    claudeCode: 'unknown',
+    codex: 'unknown',
+    openclaw: 'unknown',
+    openclawVersion: '',
+  })
+
+  const checkAll = useCallback(async () => {
+    setState({
+      claudeCode: 'checking',
+      codex: 'checking',
+      openclaw: 'checking',
+      openclawVersion: '',
+    })
+
+    // Check OpenClaw via the backend endpoint
+    discoverOpenclaw('localhost', 18789)
+      .then((result) => {
+        setState((prev) => ({
+          ...prev,
+          openclaw: result.connected ? 'available' : 'not-found',
+          openclawVersion: result.version || '',
+        }))
+      })
+      .catch(() => {
+        setState((prev) => ({ ...prev, openclaw: 'not-found' }))
+      })
+
+    // We cannot check Claude Code / Codex CLI from the browser.
+    // We mark them as 'unknown' since we cannot run shell commands here.
+    // The backend executor will surface errors when agents actually run.
+    setTimeout(() => {
+      setState((prev) => ({
+        ...prev,
+        claudeCode: prev.claudeCode === 'checking' ? 'unknown' : prev.claudeCode,
+        codex: prev.codex === 'checking' ? 'unknown' : prev.codex,
+      }))
+    }, 500)
+  }, [])
+
+  useEffect(() => {
+    checkAll()
+  }, [checkAll])
+
+  const StatusBadge = ({ status, version }: { status: CLIStatus; version?: string }) => {
+    if (status === 'checking') {
+      return (
+        <span className="flex items-center gap-1 text-xs text-slate-400">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking...
+        </span>
+      )
+    }
+    if (status === 'available') {
+      return (
+        <span className="flex items-center gap-1 text-xs text-green-400 font-medium">
+          <CheckCircle className="w-3.5 h-3.5" />
+          Available{version ? ` v${version}` : ''}
+        </span>
+      )
+    }
+    if (status === 'not-found') {
+      return (
+        <span className="flex items-center gap-1 text-xs text-amber-400">
+          <AlertCircle className="w-3.5 h-3.5" /> Not detected
+        </span>
+      )
+    }
+    return (
+      <span className="text-xs text-slate-500">Cannot check from browser</span>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Connect Local Agents</h2>
+        <p className="text-slate-400 text-sm">
+          Optional — detect AI tools installed on this machine. You can skip this step.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {/* Claude Code */}
+        <div className="bg-dark-bg border border-dark-border rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🤖</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-200">Claude Code CLI</p>
+                <p className="text-xs text-slate-500">claude-code agent type</p>
+              </div>
+            </div>
+            <StatusBadge status={state.claudeCode} />
+          </div>
+          {state.claudeCode !== 'available' && (
+            <div className="pl-7">
+              <code className="text-xs text-slate-400 bg-white/5 px-2 py-1 rounded font-mono">
+                npm install -g @anthropic-ai/claude-code
+              </code>
+            </div>
+          )}
+        </div>
+
+        {/* OpenAI Codex CLI */}
+        <div className="bg-dark-bg border border-dark-border rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">⚡</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-200">OpenAI Codex CLI</p>
+                <p className="text-xs text-slate-500">openai-codex agent type</p>
+              </div>
+            </div>
+            <StatusBadge status={state.codex} />
+          </div>
+          {state.codex !== 'available' && (
+            <div className="pl-7">
+              <code className="text-xs text-slate-400 bg-white/5 px-2 py-1 rounded font-mono">
+                npm install -g @openai/codex
+              </code>
+            </div>
+          )}
+        </div>
+
+        {/* OpenClaw */}
+        <div className="bg-dark-bg border border-dark-border rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🦞</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-200">OpenClaw</p>
+                <p className="text-xs text-slate-500">localhost:18789 — openclaw agent type</p>
+              </div>
+            </div>
+            <StatusBadge status={state.openclaw} version={state.openclawVersion} />
+          </div>
+          {state.openclaw === 'not-found' && (
+            <div className="pl-7">
+              <p className="text-xs text-slate-500">
+                Start OpenClaw or visit{' '}
+                <a
+                  href="https://docs.openclaw.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent-purple underline hover:text-purple-400"
+                >
+                  docs.openclaw.ai
+                </a>
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-dark-border rounded-xl transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Back
+        </button>
+        <button
+          onClick={checkAll}
+          className="flex items-center gap-1.5 px-4 py-2.5 text-sm text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-dark-border rounded-xl transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Check Again
+        </button>
+        <button
+          onClick={onNext}
+          className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-purple hover:bg-purple-600 text-white text-sm font-medium rounded-xl transition-colors"
+        >
+          Continue
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Step 4: First Agent ──────────────────────────────────────────────────────
 
 interface AgentTypeOption {
@@ -638,6 +840,28 @@ const AGENT_TYPES: AgentTypeOption[] = [
   },
 ]
 
+// Preset card for the first agent step
+function PresetCard({
+  preset,
+  onSelect,
+}: {
+  preset: AgentPreset
+  onSelect: (p: AgentPreset) => void
+}) {
+  return (
+    <button
+      onClick={() => onSelect(preset)}
+      className="flex items-start gap-3 p-3 rounded-xl border border-dark-border bg-dark-bg hover:border-accent-purple/60 hover:bg-accent-purple/5 transition-all text-left w-full"
+    >
+      <span className="text-xl leading-none mt-0.5 shrink-0">{preset.icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-slate-200 truncate">{preset.name}</p>
+        <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{preset.description}</p>
+      </div>
+    </button>
+  )
+}
+
 function StepFirstAgent({
   onNext,
   onBack,
@@ -651,11 +875,29 @@ function StepFirstAgent({
   const [agentConfig, setAgentConfig] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [view, setView] = useState<'presets' | 'manual'>('presets')
+  const [searchPreset, setSearchPreset] = useState('')
+
+  const { data: presetsData } = (useState(() => null) as any) // placeholder — fetch below
+  const [presets, setPresets] = useState<AgentPreset[]>([])
+
+  useEffect(() => {
+    getPresets()
+      .then((d) => setPresets(d.data || []))
+      .catch(() => {})
+  }, [])
+
+  const filteredPresets = presets.filter(
+    (p) =>
+      !searchPreset ||
+      p.name.toLowerCase().includes(searchPreset.toLowerCase()) ||
+      p.description.toLowerCase().includes(searchPreset.toLowerCase())
+  )
 
   const defaultConfig: Record<AgentType, string> = {
     http: JSON.stringify({ endpoint: 'https://api.example.com/webhook', timeout: 30000 }, null, 2),
-    claude: JSON.stringify({ model: 'claude-3-5-sonnet-20241022', system_prompt: 'You are a helpful assistant.', max_tokens: 4096 }, null, 2),
-    openai: JSON.stringify({ model: 'gpt-4o', system_prompt: 'You are a helpful assistant.', max_tokens: 4096 }, null, 2),
+    claude: JSON.stringify({ model: 'claude-sonnet-4-6', systemPrompt: 'You are a helpful assistant.', max_tokens: 4096 }, null, 2),
+    openai: JSON.stringify({ model: 'gpt-4o', systemPrompt: 'You are a helpful assistant.', max_tokens: 4096 }, null, 2),
     bash: JSON.stringify({ command: 'echo "Hello from agent!"', timeout: 30000 }, null, 2),
   }
 
@@ -665,8 +907,19 @@ function StepFirstAgent({
     setError('')
   }
 
+  const handleSelectPreset = (preset: AgentPreset) => {
+    setAgentName(preset.name)
+    setAgentDesc(preset.description)
+    setAgentConfig(JSON.stringify(preset.defaultConfig, null, 2))
+    // Map preset type to AgentType for config display (may not be a core type)
+    const coreTypes: AgentType[] = ['http', 'claude', 'openai', 'bash']
+    setSelectedType(coreTypes.includes(preset.type as any) ? (preset.type as AgentType) : null)
+    setView('manual')
+    setError('')
+  }
+
   const handleCreate = async () => {
-    if (!selectedType || !agentName.trim()) return
+    if (!agentName.trim()) return
     setCreating(true)
     setError('')
     try {
@@ -681,7 +934,7 @@ function StepFirstAgent({
       await createAgent({
         name: agentName.trim(),
         description: agentDesc.trim() || undefined,
-        type: selectedType,
+        type: (selectedType || 'claude') as any,
         config,
         status: 'active',
       })
@@ -693,83 +946,123 @@ function StepFirstAgent({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">Create your first agent</h2>
         <p className="text-slate-400 text-sm">
-          Choose a type to get started. You can always create more later.
+          Choose from a preset or configure manually. You can always create more later.
         </p>
       </div>
 
-      {/* Type selection */}
-      <div className="grid grid-cols-2 gap-3">
-        {AGENT_TYPES.map((opt) => (
+      {/* View toggle */}
+      <div className="flex gap-1 p-1 bg-dark-bg border border-dark-border rounded-xl">
+        {(['presets', 'manual'] as const).map((v) => (
           <button
-            key={opt.type}
-            onClick={() => handleSelectType(opt.type)}
-            className={`flex items-start gap-3 p-3 rounded-xl border transition-all text-left ${
-              selectedType === opt.type
-                ? 'border-accent-purple bg-accent-purple/10'
-                : 'border-dark-border bg-dark-bg hover:border-dark-border/80 hover:bg-white/5'
+            key={v}
+            onClick={() => setView(v)}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+              view === v
+                ? 'bg-accent-purple text-white'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${opt.color}`}>
-              {opt.icon}
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-200">{opt.label}</p>
-              <p className="text-xs text-slate-500">{opt.desc}</p>
-            </div>
+            {v === 'presets' ? '⚡ From Preset' : '⚙️ Manual Setup'}
           </button>
         ))}
       </div>
 
-      {/* Inline mini-form */}
-      {selectedType && (
-        <div className="bg-dark-bg border border-dark-border rounded-xl p-4 space-y-3 animate-in">
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Agent Name *
-            </label>
+      {view === 'presets' ? (
+        <>
+          <div className="relative">
             <input
               type="text"
-              value={agentName}
-              onChange={(e) => setAgentName(e.target.value)}
-              placeholder={`My ${selectedType} agent`}
-              className="w-full bg-dark-card border border-dark-border rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors"
+              value={searchPreset}
+              onChange={(e) => setSearchPreset(e.target.value)}
+              placeholder="Search presets..."
+              className="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors"
             />
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Description
-            </label>
-            <input
-              type="text"
-              value={agentDesc}
-              onChange={(e) => setAgentDesc(e.target.value)}
-              placeholder="Optional description..."
-              className="w-full bg-dark-card border border-dark-border rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors"
-            />
+          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            {filteredPresets.length === 0 ? (
+              <p className="text-center text-xs text-slate-500 py-4">No presets found</p>
+            ) : (
+              filteredPresets.map((p) => (
+                <PresetCard key={p.id} preset={p} onSelect={handleSelectPreset} />
+              ))
+            )}
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Configuration (JSON)
-            </label>
-            <textarea
-              value={agentConfig}
-              onChange={(e) => setAgentConfig(e.target.value)}
-              rows={4}
-              spellCheck={false}
-              className="w-full bg-dark-card border border-dark-border rounded-lg px-3 py-2.5 text-xs text-slate-300 font-mono placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors resize-none"
-            />
+        </>
+      ) : (
+        <>
+          {/* Type selection */}
+          <div className="grid grid-cols-2 gap-3">
+            {AGENT_TYPES.map((opt) => (
+              <button
+                key={opt.type}
+                onClick={() => handleSelectType(opt.type)}
+                className={`flex items-start gap-3 p-3 rounded-xl border transition-all text-left ${
+                  selectedType === opt.type
+                    ? 'border-accent-purple bg-accent-purple/10'
+                    : 'border-dark-border bg-dark-bg hover:border-dark-border/80 hover:bg-white/5'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${opt.color}`}>
+                  {opt.icon}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-200">{opt.label}</p>
+                  <p className="text-xs text-slate-500">{opt.desc}</p>
+                </div>
+              </button>
+            ))}
           </div>
-          {error && (
-            <div className="flex items-center gap-2 text-xs text-red-400">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              {error}
+
+          {/* Mini-form */}
+          <div className="bg-dark-bg border border-dark-border rounded-xl p-4 space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                Agent Name *
+              </label>
+              <input
+                type="text"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                placeholder={`My ${selectedType || 'claude'} agent`}
+                className="w-full bg-dark-card border border-dark-border rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors"
+              />
             </div>
-          )}
-        </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                Description
+              </label>
+              <input
+                type="text"
+                value={agentDesc}
+                onChange={(e) => setAgentDesc(e.target.value)}
+                placeholder="Optional description..."
+                className="w-full bg-dark-card border border-dark-border rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                Configuration (JSON)
+              </label>
+              <textarea
+                value={agentConfig}
+                onChange={(e) => setAgentConfig(e.target.value)}
+                rows={4}
+                spellCheck={false}
+                className="w-full bg-dark-card border border-dark-border rounded-lg px-3 py-2.5 text-xs text-slate-300 font-mono placeholder-slate-600 focus:outline-none focus:border-accent-purple transition-colors resize-none"
+              />
+            </div>
+            {error && (
+              <div className="flex items-center gap-2 text-xs text-red-400">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                {error}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       <div className="flex gap-3">
@@ -786,14 +1079,25 @@ function StepFirstAgent({
         >
           Skip
         </button>
-        <button
-          onClick={handleCreate}
-          disabled={!selectedType || !agentName.trim() || creating}
-          className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
-        >
-          {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          Create Agent
-        </button>
+        {view === 'manual' && (
+          <button
+            onClick={handleCreate}
+            disabled={!agentName.trim() || creating}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
+          >
+            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Create Agent
+          </button>
+        )}
+        {view === 'presets' && (
+          <button
+            onClick={onNext}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-purple hover:bg-purple-600 text-white text-sm font-medium rounded-xl transition-colors"
+          >
+            Continue
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   )
@@ -868,7 +1172,7 @@ function StepDone({
 
 // ─── Main Setup Component ─────────────────────────────────────────────────────
 
-const TOTAL_STEPS = 6
+const TOTAL_STEPS = 7 // 0=Welcome, 1=Security, 2=Providers, 3=Telegram, 3.5=LocalAgents, 4=FirstAgent, 5=Done
 
 export default function Setup() {
   const navigate = useNavigate()
@@ -887,8 +1191,7 @@ export default function Setup() {
           navigate('/', { replace: true })
         }
       } catch {
-        // If setup endpoint is unavailable (e.g. first boot before migration),
-        // just show the wizard
+        // If setup endpoint is unavailable, just show the wizard
       } finally {
         setLoading(false)
       }
@@ -931,8 +1234,9 @@ export default function Setup() {
     <StepSecurity key={1} onNext={goNext} onBack={goBack} />,
     <StepProviders key={2} onNext={goNext} onBack={goBack} />,
     <StepTelegram key={3} onNext={goNext} onBack={goBack} />,
-    <StepFirstAgent key={4} onNext={goNext} onBack={goBack} />,
-    <StepDone key={5} status={status} onFinish={handleFinish} />,
+    <StepLocalAgents key={4} onNext={goNext} onBack={goBack} />,
+    <StepFirstAgent key={5} onNext={goNext} onBack={goBack} />,
+    <StepDone key={6} status={status} onFinish={handleFinish} />,
   ]
 
   return (

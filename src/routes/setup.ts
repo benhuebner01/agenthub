@@ -193,4 +193,105 @@ router.get('/test-telegram', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/setup/discover-openclaw ────────────────────────────────────────
+
+router.get('/discover-openclaw', async (req: Request, res: Response) => {
+  try {
+    const host = (req.query.host as string) || 'localhost';
+    const port = parseInt((req.query.port as string) || '18789', 10);
+
+    if (isNaN(port) || port < 1 || port > 65535) {
+      res.status(400).json({ error: 'Invalid port number' });
+      return;
+    }
+
+    const baseURL = `http://${host}:${port}`;
+
+    // Try to hit the OpenAI-compatible models endpoint
+    const response = await axios.get(`${baseURL}/v1/models`, {
+      timeout: 5000,
+      validateStatus: () => true,
+    });
+
+    if (response.status === 200 && response.data) {
+      const models = response.data?.data || response.data?.models || [];
+      res.json({
+        connected: true,
+        host,
+        port,
+        models,
+        version: response.headers['x-openclaw-version'] || null,
+        raw: response.data,
+      });
+    } else {
+      res.json({
+        connected: false,
+        host,
+        port,
+        error: `Received HTTP ${response.status} from OpenClaw`,
+      });
+    }
+  } catch (err: any) {
+    const isConnRefused =
+      err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND';
+    res.json({
+      connected: false,
+      host: (req.query.host as string) || 'localhost',
+      port: parseInt((req.query.port as string) || '18789', 10),
+      error: isConnRefused
+        ? 'OpenClaw is not running on this host/port'
+        : (err.message || 'Connection failed'),
+    });
+  }
+});
+
+// ─── POST /api/setup/fetch-a2a-card ──────────────────────────────────────────
+
+router.post('/fetch-a2a-card', async (req: Request, res: Response) => {
+  try {
+    const { endpoint } = req.body as { endpoint?: string };
+
+    if (!endpoint || typeof endpoint !== 'string' || !endpoint.trim()) {
+      res.status(400).json({ error: 'endpoint is required' });
+      return;
+    }
+
+    // Derive the well-known URL from the endpoint
+    let cardUrl: string;
+    try {
+      const url = new URL(endpoint.trim());
+      cardUrl = `${url.protocol}//${url.host}/.well-known/agent-card.json`;
+    } catch {
+      res.status(400).json({ error: 'Invalid endpoint URL' });
+      return;
+    }
+
+    const response = await axios.get(cardUrl, {
+      timeout: 8000,
+      validateStatus: () => true,
+      headers: { Accept: 'application/json' },
+    });
+
+    if (response.status === 200 && response.data) {
+      res.json({
+        found: true,
+        cardUrl,
+        card: response.data,
+      });
+    } else {
+      res.json({
+        found: false,
+        cardUrl,
+        error: `Agent card not found (HTTP ${response.status})`,
+      });
+    }
+  } catch (err: any) {
+    console.error('[Setup] POST /fetch-a2a-card error:', err);
+    res.json({
+      found: false,
+      error: err.message || 'Failed to fetch agent card',
+    });
+  }
+});
+
 export default router;

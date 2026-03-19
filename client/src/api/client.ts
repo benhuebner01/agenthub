@@ -1,11 +1,23 @@
 import axios from 'axios'
 
 // Types
+export type AgentType =
+  | 'http'
+  | 'claude'
+  | 'openai'
+  | 'bash'
+  | 'claude-code'
+  | 'openai-codex'
+  | 'openclaw'
+  | 'cursor'
+  | 'a2a'
+  | 'internal'
+
 export interface Agent {
   id: string
   name: string
   description: string | null
-  type: 'http' | 'claude' | 'openai' | 'bash'
+  type: AgentType
   config: Record<string, unknown>
   status: 'active' | 'paused' | 'error'
   createdAt: string
@@ -80,9 +92,21 @@ export interface AuditLog {
 export interface CreateAgentDto {
   name: string
   description?: string
-  type: 'http' | 'claude' | 'openai' | 'bash'
+  type: AgentType
   config: Record<string, unknown>
   status?: 'active' | 'paused' | 'error'
+}
+
+export interface AgentPreset {
+  id: string
+  name: string
+  description: string
+  type: string
+  icon: string
+  category: 'local-cli' | 'ai-api' | 'automation' | 'protocol' | 'custom'
+  defaultConfig: Record<string, any>
+  requiredSetup?: string
+  docsUrl?: string
 }
 
 export interface CreateScheduleDto {
@@ -260,6 +284,42 @@ export const testTelegram = (token: string) =>
   api
     .get<{ valid: boolean; botName?: string; botId?: number; firstName?: string; error?: string }>(
       `/setup/test-telegram?token=${encodeURIComponent(token)}`
+    )
+    .then((r) => r.data)
+
+// Presets
+export const getPresets = () =>
+  api.get<{ data: AgentPreset[]; total: number }>('/presets').then((r) => r.data)
+
+export const getPreset = (id: string) =>
+  api.get<{ data: AgentPreset }>(`/presets/${id}`).then((r) => r.data)
+
+// Internal Agent Chat
+export const chatWithInternalAgent = (
+  message: string,
+  history?: { role: string; content: string }[]
+) =>
+  api
+    .post<{ success: boolean; message: string; provider: 'anthropic' | 'openai'; model: string }>(
+      '/internal-agent/chat',
+      { message, history }
+    )
+    .then((r) => r.data)
+
+// OpenClaw Discovery
+export const discoverOpenclaw = (host: string, port: number) =>
+  api
+    .get<{ connected: boolean; host: string; port: number; models?: any[]; version?: string | null; error?: string }>(
+      `/setup/discover-openclaw?host=${encodeURIComponent(host)}&port=${port}`
+    )
+    .then((r) => r.data)
+
+// A2A Card Fetch
+export const fetchA2ACard = (endpoint: string) =>
+  api
+    .post<{ found: boolean; cardUrl?: string; card?: any; error?: string }>(
+      '/setup/fetch-a2a-card',
+      { endpoint }
     )
     .then((r) => r.data)
 

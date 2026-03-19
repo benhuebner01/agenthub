@@ -9,6 +9,8 @@ import schedulesRouter from './routes/schedules';
 import budgetsRouter from './routes/budgets';
 import runsRouter from './routes/runs';
 import setupRouter from './routes/setup';
+import presetsRouter from './routes/presets';
+import internalAgentRouter from './routes/internal-agent';
 
 // Services
 import { startScheduler, getSchedulerMode } from './services/scheduler';
@@ -38,6 +40,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Setup routes — NO auth required (must be before apiAuthMiddleware)
 app.use('/api/setup', setupRouter);
+
+// Presets — NO auth required (read-only public data)
+app.use('/api/presets', presetsRouter);
+
+// Internal agent chat — NO auth required
+app.use('/api/internal-agent', internalAgentRouter);
 
 // API Key authentication middleware (protect mutation endpoints)
 const apiAuthMiddleware = (req: Request, res: Response, next: NextFunction): void => {

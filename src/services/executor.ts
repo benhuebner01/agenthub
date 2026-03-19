@@ -9,6 +9,27 @@ import { v4 as uuidv4 } from 'uuid';
 
 const execAsync = promisify(exec);
 
+// ─── Model Pricing ────────────────────────────────────────────────────────────
+
+const CLAUDE_MODELS = {
+  'claude-opus-4-6': { inputCostPerMTok: 5, outputCostPerMTok: 25 },
+  'claude-sonnet-4-6': { inputCostPerMTok: 3, outputCostPerMTok: 15 },
+  'claude-haiku-4-5-20251001': { inputCostPerMTok: 1, outputCostPerMTok: 5 },
+};
+
+const OPENAI_MODELS = {
+  'gpt-5.4-pro': { inputCostPerMTok: 2.5, outputCostPerMTok: 15 },
+  'gpt-5.4-nano': { inputCostPerMTok: 0.2, outputCostPerMTok: 1.25 },
+  'gpt-5.4-mini': { inputCostPerMTok: 0.2, outputCostPerMTok: 1.25 },
+  'gpt-4o': { inputCostPerMTok: 2.5, outputCostPerMTok: 10 },
+  'gpt-4o-mini': { inputCostPerMTok: 0.15, outputCostPerMTok: 0.6 },
+  'o3': { inputCostPerMTok: 2, outputCostPerMTok: 8 },
+  'o3-mini': { inputCostPerMTok: 1.1, outputCostPerMTok: 4.4 },
+  'o4-mini': { inputCostPerMTok: 1.1, outputCostPerMTok: 4.4 },
+};
+
+// ─── Result Type ──────────────────────────────────────────────────────────────
+
 export interface ExecutionResult {
   success: boolean;
   output: unknown;
@@ -16,6 +37,8 @@ export interface ExecutionResult {
   costUsd: number;
   error?: string;
 }
+
+// ─── HTTP Agent ───────────────────────────────────────────────────────────────
 
 async function executeHttpAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const endpoint = config.endpoint as string;
@@ -46,6 +69,8 @@ async function executeHttpAgent(config: Record<string, unknown>, input: unknown)
   };
 }
 
+// ─── Claude Agent ─────────────────────────────────────────────────────────────
+
 async function executeClaudeAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
 
@@ -55,8 +80,8 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
   }
 
   const client = new Anthropic({ apiKey });
-  const model = (config.model as string) || 'claude-3-5-sonnet-20241022';
-  const systemPrompt = (config.system_prompt as string) || 'You are a helpful assistant.';
+  const model = (config.model as string) || 'claude-sonnet-4-6';
+  const systemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
 
   const userMessage = typeof input === 'string' ? input : JSON.stringify(input);
 
@@ -71,8 +96,8 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
   const outputTokens = response.usage.output_tokens;
   const tokensUsed = inputTokens + outputTokens;
 
-  // claude-3-5-sonnet pricing: $3/M input, $15/M output
-  const costUsd = (inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15;
+  const modelCosts = CLAUDE_MODELS[model as keyof typeof CLAUDE_MODELS] || { inputCostPerMTok: 3, outputCostPerMTok: 15 };
+  const costUsd = (inputTokens / 1_000_000) * modelCosts.inputCostPerMTok + (outputTokens / 1_000_000) * modelCosts.outputCostPerMTok;
 
   const outputText = response.content
     .filter((block) => block.type === 'text')
@@ -87,6 +112,8 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
   };
 }
 
+// ─── OpenAI Agent ─────────────────────────────────────────────────────────────
+
 async function executeOpenAIAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const OpenAI = (await import('openai')).default;
 
@@ -97,7 +124,7 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
 
   const client = new OpenAI({ apiKey });
   const model = (config.model as string) || 'gpt-4o';
-  const systemPrompt = (config.system_prompt as string) || 'You are a helpful assistant.';
+  const systemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
 
   const userMessage = typeof input === 'string' ? input : JSON.stringify(input);
 
@@ -114,8 +141,8 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
   const outputTokens = response.usage?.completion_tokens || 0;
   const tokensUsed = inputTokens + outputTokens;
 
-  // gpt-4o pricing: $2.50/M input, $10/M output
-  const costUsd = (inputTokens / 1_000_000) * 2.5 + (outputTokens / 1_000_000) * 10;
+  const modelCosts = OPENAI_MODELS[model as keyof typeof OPENAI_MODELS] || { inputCostPerMTok: 2.5, outputCostPerMTok: 10 };
+  const costUsd = (inputTokens / 1_000_000) * modelCosts.inputCostPerMTok + (outputTokens / 1_000_000) * modelCosts.outputCostPerMTok;
 
   const outputText = response.choices[0]?.message?.content || '';
 
@@ -126,6 +153,8 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
     costUsd,
   };
 }
+
+// ─── Bash Agent ───────────────────────────────────────────────────────────────
 
 async function executeBashAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const command = config.command as string;
@@ -148,6 +177,7 @@ async function executeBashAgent(config: Record<string, unknown>, input: unknown)
     timeout,
     env,
     shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+    cwd: (config.workDir as string) || process.cwd(),
   });
 
   return {
@@ -157,6 +187,198 @@ async function executeBashAgent(config: Record<string, unknown>, input: unknown)
     costUsd: 0,
   };
 }
+
+// ─── Claude Code CLI Agent ────────────────────────────────────────────────────
+
+async function executeClaudeCodeAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  // config: { model?: string, systemPrompt?: string, maxTurns?: number, workDir?: string, tools?: string }
+  const { execSync } = require('child_process');
+  const model = (config.model as string) || 'claude-sonnet-4-6';
+  const maxTurns = (config.maxTurns as number) || 5;
+  const workDir = (config.workDir as string) || process.cwd();
+  const prompt = typeof input === 'string' ? input : JSON.stringify(input);
+
+  let cmd = `claude -p ${JSON.stringify(prompt)} --output-format json --max-turns ${maxTurns} --model ${model}`;
+  if (config.systemPrompt) cmd += ` --system-prompt ${JSON.stringify(config.systemPrompt)}`;
+  if (config.tools) cmd += ` --tools ${config.tools}`;
+
+  try {
+    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8' });
+    const result = JSON.parse(stdout);
+    return {
+      success: true,
+      output: result,
+      tokensUsed: result.usage?.input_tokens + result.usage?.output_tokens || 0,
+      costUsd: 0,
+    };
+  } catch (err: any) {
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+  }
+}
+
+// ─── OpenAI Codex CLI Agent ───────────────────────────────────────────────────
+
+async function executeOpenAICodexAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  // config: { model?: string, workDir?: string, mode?: 'suggest' | 'auto-edit' | 'full-auto' }
+  const { execSync } = require('child_process');
+  const workDir = (config.workDir as string) || process.cwd();
+  const mode = (config.mode as string) || 'full-auto';
+  const prompt = typeof input === 'string' ? input : JSON.stringify(input);
+
+  const env = { ...process.env };
+  if (config.apiKeyOverride) (env as any).OPENAI_API_KEY = config.apiKeyOverride;
+
+  let cmd = `codex --${mode} --output-format json ${JSON.stringify(prompt)}`;
+
+  try {
+    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8', env });
+    return { success: true, output: JSON.parse(stdout), tokensUsed: 0, costUsd: 0 };
+  } catch (err: any) {
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+  }
+}
+
+// ─── Cursor Agent ─────────────────────────────────────────────────────────────
+
+async function executeCursorAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  // config: { workDir?: string, outputFormat?: 'text' | 'json' | 'stream-json' }
+  const { execSync } = require('child_process');
+  const workDir = (config.workDir as string) || process.cwd();
+  const fmt = (config.outputFormat as string) || 'text';
+  const prompt = typeof input === 'string' ? input : JSON.stringify(input);
+
+  const env = { ...process.env };
+  if (config.apiKey) (env as any).CURSOR_API_KEY = config.apiKey;
+
+  const cmd = `cursor --print ${JSON.stringify(prompt)} --output-format ${fmt}`;
+
+  try {
+    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8', env });
+    return {
+      success: true,
+      output: fmt === 'json' ? JSON.parse(stdout) : stdout,
+      tokensUsed: 0,
+      costUsd: 0,
+    };
+  } catch (err: any) {
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+  }
+}
+
+// ─── OpenClaw Agent ───────────────────────────────────────────────────────────
+
+async function executeOpenClawAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  // config: { host?: string, port?: number, model?: string, token?: string, systemPrompt?: string }
+  const host = (config.host as string) || 'localhost';
+  const port = (config.port as number) || 18789;
+  const model = (config.model as string) || 'openclaw:main';
+  const baseURL = `http://${host}:${port}/v1`;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.token) headers['Authorization'] = `Bearer ${config.token as string}`;
+
+  const messages: { role: string; content: string }[] = [];
+  if (config.systemPrompt) messages.push({ role: 'system', content: config.systemPrompt as string });
+  messages.push({ role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) });
+
+  try {
+    const resp = await axios.post(`${baseURL}/chat/completions`, { model, messages }, { headers });
+    const content = resp.data.choices?.[0]?.message?.content || '';
+    const usage = resp.data.usage || {};
+    return {
+      success: true,
+      output: content,
+      tokensUsed: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+      costUsd: 0,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      output: null,
+      tokensUsed: 0,
+      costUsd: 0,
+      error: err.response?.data?.error?.message || err.message,
+    };
+  }
+}
+
+// ─── A2A Protocol Agent ───────────────────────────────────────────────────────
+
+async function executeA2AAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  // config: { endpoint: string, apiKey?: string, agentCardUrl?: string }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey as string}`;
+
+  const messageId = uuidv4();
+  const taskId = uuidv4();
+
+  const body = {
+    jsonrpc: '2.0',
+    id: messageId,
+    method: 'a2a.sendMessage',
+    params: {
+      message: {
+        messageId,
+        taskId,
+        role: 'user',
+        parts: [{ kind: 'text', text: typeof input === 'string' ? input : JSON.stringify(input) }],
+      },
+    },
+  };
+
+  try {
+    const resp = await axios.post(config.endpoint as string, body, { headers });
+    const result = resp.data?.result;
+    const text = result?.parts?.find((p: any) => p.kind === 'text')?.text || JSON.stringify(result);
+    return { success: true, output: text, tokensUsed: 0, costUsd: 0 };
+  } catch (err: any) {
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+  }
+}
+
+// ─── Internal Agent ───────────────────────────────────────────────────────────
+
+async function executeInternalAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  // config: { provider?: 'anthropic'|'openai', model?: string, systemPrompt?: string }
+  const provider = (config.provider as string) || (process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'openai');
+
+  if (provider === 'anthropic') {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const model = (config.model as string) || 'claude-sonnet-4-6';
+    const messages: any[] = [{ role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) }];
+    const resp = await client.messages.create({
+      model,
+      max_tokens: 4096,
+      system: (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.',
+      messages,
+    });
+    const content = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+    const tokensUsed = resp.usage.input_tokens + resp.usage.output_tokens;
+    const modelCosts = CLAUDE_MODELS[model as keyof typeof CLAUDE_MODELS] || { inputCostPerMTok: 3, outputCostPerMTok: 15 };
+    const costUsd =
+      (resp.usage.input_tokens / 1_000_000) * modelCosts.inputCostPerMTok +
+      (resp.usage.output_tokens / 1_000_000) * modelCosts.outputCostPerMTok;
+    return { success: true, output: content, tokensUsed, costUsd };
+  } else {
+    const OpenAI = require('openai');
+    const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
+    const model = (config.model as string) || 'gpt-4o';
+    const resp = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.' },
+        { role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) },
+      ],
+    });
+    const content = resp.choices[0]?.message?.content || '';
+    const usage = resp.usage || { prompt_tokens: 0, completion_tokens: 0 };
+    const tokensUsed = usage.prompt_tokens + usage.completion_tokens;
+    return { success: true, output: content, tokensUsed, costUsd: 0 };
+  }
+}
+
+// ─── Main executeAgent ────────────────────────────────────────────────────────
 
 export async function executeAgent(
   agentId: string,
@@ -211,6 +433,24 @@ export async function executeAgent(
         break;
       case 'bash':
         result = await executeBashAgent(config, input);
+        break;
+      case 'claude-code':
+        result = await executeClaudeCodeAgent(config, input);
+        break;
+      case 'openai-codex':
+        result = await executeOpenAICodexAgent(config, input);
+        break;
+      case 'cursor':
+        result = await executeCursorAgent(config, input);
+        break;
+      case 'openclaw':
+        result = await executeOpenClawAgent(config, input);
+        break;
+      case 'a2a':
+        result = await executeA2AAgent(config, input);
+        break;
+      case 'internal':
+        result = await executeInternalAgent(config, input);
         break;
       default:
         throw new Error(`Unknown agent type: ${agentRecord.type}`);
