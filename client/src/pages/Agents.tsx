@@ -1,0 +1,327 @@
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  Plus,
+  Play,
+  Pencil,
+  Trash2,
+  Pause,
+  RotateCcw,
+  ChevronDown,
+  ChevronRight,
+  Bot,
+  Globe,
+  Terminal,
+  Cpu,
+} from 'lucide-react'
+import {
+  getAgents,
+  deleteAgent,
+  updateAgent,
+  runAgent,
+  getAgentRuns,
+  Agent,
+} from '../api/client'
+import { useToast } from '../components/Toaster'
+import StatusBadge from '../components/StatusBadge'
+import Modal from '../components/Modal'
+import AgentForm from '../components/AgentForm'
+
+const TYPE_ICONS: Record<string, React.ElementType> = {
+  http: Globe,
+  claude: Cpu,
+  openai: Cpu,
+  bash: Terminal,
+}
+
+function formatDate(dt: string | null): string {
+  if (!dt) return '-'
+  return new Date(dt).toLocaleString()
+}
+
+function AgentRow({ agent }: { agent: Agent }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [expanded, setExpanded] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const Icon = TYPE_ICONS[agent.type] ?? Bot
+
+  const { data: agentRunsData, isLoading: runsLoading } = useQuery({
+    queryKey: ['agentRuns', agent.id],
+    queryFn: () => getAgentRuns(agent.id, 5, 0),
+    enabled: expanded,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteAgent(agent.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success(`Agent "${agent.name}" deleted`)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: () =>
+      updateAgent(agent.id, {
+        status: agent.status === 'paused' ? 'active' : 'paused',
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success(`Agent ${agent.status === 'paused' ? 'resumed' : 'paused'}`)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const runMutation = useMutation({
+    mutationFn: () => runAgent(agent.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['runs'] })
+      qc.invalidateQueries({ queryKey: ['agentRuns', agent.id] })
+      toast.success(`Agent "${agent.name}" triggered`)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  return (
+    <>
+      <tr className="border-b border-dark-border hover:bg-white/3 transition-colors">
+        <td className="px-5 py-3">
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="flex items-center gap-2 text-left"
+          >
+            {expanded ? (
+              <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+            )}
+            <div>
+              <p className="text-slate-200 font-medium">{agent.name}</p>
+              {agent.description && (
+                <p className="text-xs text-slate-500 mt-0.5 max-w-xs truncate">
+                  {agent.description}
+                </p>
+              )}
+            </div>
+          </button>
+        </td>
+        <td className="px-5 py-3">
+          <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+            <Icon className="w-3.5 h-3.5" />
+            {agent.type}
+          </span>
+        </td>
+        <td className="px-5 py-3">
+          <StatusBadge status={agent.status} />
+        </td>
+        <td className="px-5 py-3 text-xs text-slate-500">{formatDate(agent.createdAt)}</td>
+        <td className="px-5 py-3">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => runMutation.mutate()}
+              disabled={runMutation.isPending || agent.status === 'paused'}
+              title="Run now"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-green-400 hover:bg-green-500/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <Play className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setEditOpen(true)}
+              title="Edit"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => toggleMutation.mutate()}
+              disabled={toggleMutation.isPending}
+              title={agent.status === 'paused' ? 'Resume' : 'Pause'}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-yellow-400 hover:bg-yellow-500/10 disabled:opacity-30 transition-colors"
+            >
+              {agent.status === 'paused' ? (
+                <RotateCcw className="w-4 h-4" />
+              ) : (
+                <Pause className="w-4 h-4" />
+              )}
+            </button>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              title="Delete"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </td>
+      </tr>
+
+      {/* Expanded runs */}
+      {expanded && (
+        <tr className="border-b border-dark-border bg-dark-bg/50">
+          <td colSpan={5} className="px-10 py-4">
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+              Last 5 Runs
+            </p>
+            {runsLoading ? (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <div className="w-4 h-4 border border-accent-purple border-t-transparent rounded-full animate-spin" />
+                Loading...
+              </div>
+            ) : !agentRunsData?.data.length ? (
+              <p className="text-xs text-slate-500">No runs yet for this agent.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {agentRunsData.data.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-4 text-xs bg-dark-card rounded-lg px-3 py-2 border border-dark-border"
+                  >
+                    <StatusBadge status={r.status} />
+                    <span className="text-slate-400 font-mono">{r.id.slice(0, 8)}...</span>
+                    <span className="text-slate-500">{r.triggeredBy}</span>
+                    <span className="text-slate-500 ml-auto">
+                      {r.createdAt ? formatDate(r.createdAt) : '-'}
+                    </span>
+                    {r.error && (
+                      <span className="text-red-400 truncate max-w-xs">{r.error}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+
+      {/* Edit Modal */}
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Agent">
+        <AgentForm agent={agent} onClose={() => setEditOpen(false)} />
+      </Modal>
+
+      {/* Delete confirm */}
+      <Modal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Delete Agent"
+        maxWidth="max-w-sm"
+      >
+        <p className="text-sm text-slate-300 mb-4">
+          Are you sure you want to delete{' '}
+          <strong className="text-white">"{agent.name}"</strong>? This will also remove all
+          associated schedules.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              deleteMutation.mutate()
+              setConfirmDelete(false)
+            }}
+            disabled={deleteMutation.isPending}
+            className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setConfirmDelete(false)}
+            className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-sm font-medium rounded-lg border border-dark-border transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </Modal>
+    </>
+  )
+}
+
+export default function Agents() {
+  const [createOpen, setCreateOpen] = useState(false)
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['agents'],
+    queryFn: getAgents,
+    refetchInterval: 30_000,
+  })
+
+  const agents = data?.data ?? []
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Agents</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            {data ? `${data.total} agent${data.total !== 1 ? 's' : ''}` : 'Loading...'}
+          </p>
+        </div>
+        <button
+          onClick={() => setCreateOpen(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-accent-purple hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          New Agent
+        </button>
+      </div>
+
+      <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-48">
+            <div className="w-8 h-8 border-2 border-accent-purple border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : error ? (
+          <div className="flex items-center justify-center h-48 text-red-400">
+            <p className="text-sm">Failed to load agents. Check your connection.</p>
+          </div>
+        ) : agents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-slate-500">
+            <Bot className="w-10 h-10 mb-3 opacity-40" />
+            <p className="text-sm font-medium">No agents yet</p>
+            <p className="text-xs mt-1">Create your first agent to get started</p>
+            <button
+              onClick={() => setCreateOpen(true)}
+              className="mt-4 flex items-center gap-2 px-4 py-2 bg-accent-purple/20 hover:bg-accent-purple/30 text-accent-purple text-sm rounded-lg border border-accent-purple/30 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Create Agent
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-dark-border">
+                  <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Name
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Type
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Created
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create Agent">
+        <AgentForm onClose={() => setCreateOpen(false)} />
+      </Modal>
+    </div>
+  )
+}
