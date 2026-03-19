@@ -504,6 +504,56 @@ export async function executeAgent(
       case 'internal':
         result = await executeInternalAgent(config, input, memoryContext);
         break;
+      case 'mcp': {
+        // config: { transport: 'http'|'stdio', endpoint?: string, command?: string, toolName?: string, arguments?: object, token?: string }
+        if (config.transport === 'http' || !config.transport) {
+          // Call MCP server via HTTP — MCP JSON-RPC
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (config.token) headers['Authorization'] = `Bearer ${config.token as string}`;
+          const body = {
+            jsonrpc: '2.0',
+            id: crypto.randomUUID(),
+            method: 'tools/call',
+            params: {
+              name: config.toolName || 'run',
+              arguments: typeof input === 'object' ? input : { input },
+            },
+          };
+          try {
+            const resp = await axios.post(config.endpoint as string, body, { headers });
+            const mcpResult = resp.data?.result;
+            const content = Array.isArray(mcpResult?.content)
+              ? mcpResult.content.map((c: any) => c.text || JSON.stringify(c)).join('\n')
+              : JSON.stringify(mcpResult);
+            result = { success: true, output: content, tokensUsed: 0, costUsd: 0 };
+          } catch (err: any) {
+            result = { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+          }
+        } else {
+          // stdio transport — spawn MCP server as subprocess
+          const { execSync } = require('child_process');
+          const inputJson = JSON.stringify({
+            jsonrpc: '2.0',
+            id: '1',
+            method: 'tools/call',
+            params: {
+              name: config.toolName || 'run',
+              arguments: typeof input === 'object' ? input : { input },
+            },
+          });
+          try {
+            const stdout = execSync(`echo '${inputJson}' | ${config.command as string}`, {
+              timeout: 30000,
+              encoding: 'utf8',
+            });
+            const mcpResult = JSON.parse(stdout);
+            result = { success: true, output: mcpResult?.result || stdout, tokensUsed: 0, costUsd: 0 };
+          } catch (err: any) {
+            result = { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+          }
+        }
+        break;
+      }
       default:
         throw new Error(`Unknown agent type: ${agentRecord.type}`);
     }

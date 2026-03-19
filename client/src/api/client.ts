@@ -12,6 +12,7 @@ export type AgentType =
   | 'cursor'
   | 'a2a'
   | 'internal'
+  | 'mcp'
 
 export type AgentRole = 'ceo' | 'manager' | 'worker' | 'specialist'
 
@@ -174,7 +175,8 @@ export interface AgentPreset {
   description: string
   type: string
   icon: string
-  category: 'local-cli' | 'ai-api' | 'automation' | 'protocol' | 'custom'
+  category: 'local' | 'ai-api' | 'http' | 'automation' | 'mcp' | 'bash'
+  popular: boolean
   defaultConfig: Record<string, any>
   requiredSetup?: string
   docsUrl?: string
