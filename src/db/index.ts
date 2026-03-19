@@ -1,20 +1,41 @@
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from './schema';
+import 'dotenv/config';
 import path from 'path';
 import fs from 'fs';
 
-const dataDir = process.env.DATA_DIR || './data';
-if (!fs.existsSync(dataDir)) {
+export const mode: 'sqlite' | 'postgres' = process.env.DATABASE_URL?.startsWith('postgresql')
+  ? 'postgres'
+  : 'sqlite';
+
+let _db: any;
+let _sqliteInstance: any;
+
+if (mode === 'postgres') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { Pool } = require('pg');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { drizzle } = require('drizzle-orm/node-postgres');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const schema = require('./schema');
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  _db = drizzle(pool, { schema });
+} else {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Database = require('better-sqlite3');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { drizzle } = require('drizzle-orm/better-sqlite3');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const schema = require('./schema');
+  const dataDir = process.env.DATA_DIR || './data';
   fs.mkdirSync(dataDir, { recursive: true });
+  const dbPath = path.join(dataDir, 'agenthub.db');
+  _sqliteInstance = new Database(dbPath);
+  _sqliteInstance.pragma('journal_mode = WAL');
+  _sqliteInstance.pragma('foreign_keys = ON');
+  _db = drizzle(_sqliteInstance, { schema });
 }
 
-const dbPath = path.join(dataDir, 'agenthub.db');
-const sqlite = new Database(dbPath);
+export const db: any = _db;
+export const sqlite: any = _sqliteInstance;
 
-// Enable WAL mode for better concurrent read performance
-sqlite.pragma('journal_mode = WAL');
-sqlite.pragma('foreign_keys = ON');
-
-export const db = drizzle(sqlite, { schema });
-export { sqlite };
+// Legacy alias used by some modules
+export const sqliteInstance: any = _sqliteInstance;

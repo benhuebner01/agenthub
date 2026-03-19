@@ -85,6 +85,17 @@ export const telegramUsers = sqliteTable('telegram_users', {
   createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 });
 
+// Settings table
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
+
+// Type exports for settings
+export type Setting = typeof settings.$inferSelect;
+export type NewSetting = typeof settings.$inferInsert;
+
 // Relations
 export const agentsRelations = relations(agents, ({ many, one }) => ({
   schedules: many(schedules),

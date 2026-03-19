@@ -232,4 +232,35 @@ export const getAuditLogs = (params?: { limit?: number; offset?: number }) =>
     })
     .then((r) => r.data)
 
+// Setup / Onboarding
+export const getSetupStatus = () =>
+  api.get<{
+    complete: boolean
+    dbMode: 'sqlite' | 'postgres'
+    schedulerMode: 'cron' | 'bullmq'
+    steps: { apiKeys: boolean; telegram: boolean; firstAgent: boolean }
+  }>('/setup/status').then((r) => r.data)
+
+export const completeSetup = () =>
+  api.post<{ success: boolean; message: string }>('/setup/complete').then((r) => r.data)
+
+export const saveApiKeys = (keys: {
+  anthropicKey?: string
+  openaiKey?: string
+  apiSecret?: string
+}) => api.post<{ success: boolean; message: string }>('/setup/api-keys', keys).then((r) => r.data)
+
+export const saveTelegramConfig = (config: { botToken: string; authorizedUsers: string }) =>
+  api.post<{ success: boolean; message: string; botName?: string; botId?: number }>(
+    '/setup/telegram',
+    config
+  ).then((r) => r.data)
+
+export const testTelegram = (token: string) =>
+  api
+    .get<{ valid: boolean; botName?: string; botId?: number; firstName?: string; error?: string }>(
+      `/setup/test-telegram?token=${encodeURIComponent(token)}`
+    )
+    .then((r) => r.data)
+
 export default api
