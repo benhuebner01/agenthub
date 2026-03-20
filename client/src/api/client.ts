@@ -309,7 +309,7 @@ export const deleteAgentMemory = (agentId: string, key: string) =>
   api.delete<{ message: string }>(`/agents/${agentId}/memory/${key}`).then((r) => r.data)
 
 export const getAgentSoulMd = (agentId: string) =>
-  api.get<{ data: { agentId: string; agentName: string; soulMd: string; heartbeatMd: string } }>(
+  api.get<{ data: { agentId: string; agentName: string; soulMd: string; heartbeatMd: string; bootstrapMd: string } }>(
     `/agents/${agentId}/soul-md`
   ).then((r) => r.data)
 
@@ -321,6 +321,25 @@ export const getAgentHubPrompt = (agentId: string) =>
 export const getAgentConnectorScript = (agentId: string) =>
   api.get<{ data: { agentId: string; agentName: string; script: string } }>(
     `/agents/${agentId}/connector-script`
+  ).then((r) => r.data)
+
+// Onboarding helpers — Paperclip-style connection checks
+export const testCli = (type: 'claude-code' | 'openai-codex' | 'cursor') =>
+  api.post<{ installed: boolean; version?: string; error?: string; hint?: string }>(
+    '/agents/test-cli',
+    { type }
+  ).then((r) => r.data)
+
+export const testApiKey = (provider: 'anthropic' | 'openai', apiKey: string) =>
+  api.post<{ valid: boolean; model?: string; modelCount?: number; error?: string }>(
+    '/agents/test-api-key',
+    { provider, apiKey }
+  ).then((r) => r.data)
+
+export const testHttpEndpoint = (url: string, headers?: Record<string, string>) =>
+  api.post<{ reachable: boolean; status?: number; statusText?: string; error?: string }>(
+    '/agents/test-http-endpoint',
+    { url, headers }
   ).then((r) => r.data)
 
 // ─── Runs ─────────────────────────────────────────────────────────────────────

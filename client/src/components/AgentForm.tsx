@@ -13,6 +13,9 @@ import {
   getAgentSoulMd,
   getAgentHubPrompt,
   getAgentConnectorScript,
+  testCli,
+  testApiKey,
+  testHttpEndpoint,
 } from '../api/client'
 import { useToast } from './Toaster'
 import {
@@ -28,6 +31,10 @@ import {
   Plug,
   Copy,
   FileText,
+  Download,
+  Terminal,
+  Key,
+  Globe,
 } from 'lucide-react'
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -483,6 +490,8 @@ function HttpConfig({
   )
   const [authValue, setAuthValue] = useState((config.authValue as string) || '')
   const [bodyTemplate, setBodyTemplate] = useState((config.bodyTemplate as string) || '')
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+  const [testMsg, setTestMsg] = useState('')
 
   useEffect(() => {
     const headersObj: Record<string, string> = {}
@@ -576,6 +585,40 @@ function HttpConfig({
           placeholder='{"key": "value"}'
         />
       </div>
+
+      {/* ── Test Endpoint ── */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={!endpoint.trim() || testStatus === 'testing'}
+          onClick={async () => {
+            setTestStatus('testing')
+            setTestMsg('')
+            try {
+              const headersObj: Record<string, string> = {}
+              for (const row of headers) { if (row.key.trim()) headersObj[row.key.trim()] = row.value }
+              if (authType === 'bearer' && authValue) headersObj['Authorization'] = `Bearer ${authValue}`
+              const r = await testHttpEndpoint(endpoint.trim(), headersObj)
+              if (r.reachable) {
+                setTestStatus('ok')
+                setTestMsg(`HTTP ${r.status} ${r.statusText || ''}`.trim())
+              } else {
+                setTestStatus('error')
+                setTestMsg(r.error || `HTTP ${r.status}`)
+              }
+            } catch {
+              setTestStatus('error')
+              setTestMsg('Request failed')
+            }
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {testStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+          Test Endpoint
+        </button>
+        {testStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{testMsg}</span>}
+        {testStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{testMsg}</span>}
+      </div>
     </div>
   )
 }
@@ -596,12 +639,26 @@ function ClaudeConfig({
   const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || 4096))
   const [apiKey, setApiKey] = useState((config.api_key_override as string) || '')
   const [showApiKey, setShowApiKey] = useState(false)
+  const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+  const [keyMsg, setKeyMsg] = useState('')
 
   useEffect(() => {
     const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || 4096 }
     if (apiKey) c.api_key_override = apiKey
     onChange(c)
   }, [model, systemPrompt, maxTokens, apiKey])
+
+  const handleTestKey = async () => {
+    const keyToTest = apiKey || (import.meta as any).env?.VITE_ANTHROPIC_API_KEY || ''
+    if (!keyToTest) { setKeyStatus('error'); setKeyMsg('Enter an API key to test'); return }
+    setKeyStatus('testing')
+    setKeyMsg('')
+    try {
+      const r = await testApiKey('anthropic', keyToTest)
+      if (r.valid) { setKeyStatus('ok'); setKeyMsg(`Valid — ${r.model || 'claude'}`) }
+      else { setKeyStatus('error'); setKeyMsg(r.error || 'Invalid key') }
+    } catch { setKeyStatus('error'); setKeyMsg('Test failed') }
+  }
 
   return (
     <div className="space-y-3">
@@ -636,28 +693,40 @@ function ClaudeConfig({
           className={INPUT_CLASS}
         />
       </div>
-      <div>
+
+      {/* ── API Key + Test ── */}
+      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
         <button
           type="button"
           onClick={() => setShowApiKey(!showApiKey)}
-          className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 transition-colors"
+          className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors"
         >
-          <ChevronRight
-            className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`}
-          />
+          <Key className="w-3.5 h-3.5" />
+          <ChevronRight className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`} />
           API Key Override (optional)
         </button>
         {showApiKey && (
-          <div className="mt-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-ant-... (uses ANTHROPIC_API_KEY env var if empty)"
-              className={INPUT_CLASS}
-            />
-          </div>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-ant-... (uses ANTHROPIC_API_KEY env var if empty)"
+            className={INPUT_CLASS}
+          />
         )}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleTestKey}
+            disabled={keyStatus === 'testing'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {keyStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+            Test API Key
+          </button>
+          {keyStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+          {keyStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+        </div>
       </div>
     </div>
   )
@@ -672,13 +741,15 @@ function OpenAIConfig({
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
 }) {
-  const [model, setModel] = useState((config.model as string) || 'gpt-4o')
+  const [model, setModel] = useState((config.model as string) || 'gpt-5.4')
   const [systemPrompt, setSystemPrompt] = useState(
     (config.systemPrompt as string) || (config.system_prompt as string) || ''
   )
   const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || 4096))
   const [apiKey, setApiKey] = useState((config.api_key_override as string) || '')
   const [showApiKey, setShowApiKey] = useState(false)
+  const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+  const [keyMsg, setKeyMsg] = useState('')
 
   useEffect(() => {
     const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || 4096 }
@@ -686,15 +757,27 @@ function OpenAIConfig({
     onChange(c)
   }, [model, systemPrompt, maxTokens, apiKey])
 
+  const handleTestKey = async () => {
+    if (!apiKey) { setKeyStatus('error'); setKeyMsg('Enter an API key to test'); return }
+    setKeyStatus('testing')
+    setKeyMsg('')
+    try {
+      const r = await testApiKey('openai', apiKey)
+      if (r.valid) { setKeyStatus('ok'); setKeyMsg(`Valid — ${r.modelCount} models available`) }
+      else { setKeyStatus('error'); setKeyMsg(r.error || 'Invalid key') }
+    } catch { setKeyStatus('error'); setKeyMsg('Test failed') }
+  }
+
   return (
     <div className="space-y-3">
       <div>
         <label className={LABEL_CLASS}>Model</label>
         <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
           <optgroup label="GPT-5.4">
-            <option value="gpt-5.4-pro">gpt-5.4-pro — state-of-the-art</option>
-            <option value="gpt-5.4-nano">gpt-5.4-nano — very fast &amp; cheap</option>
-            <option value="gpt-5.4-mini">gpt-5.4-mini — fast &amp; cheap</option>
+            <option value="gpt-5.4">gpt-5.4 — flagship ($2.50/$15.00)</option>
+            <option value="gpt-5.4-pro">gpt-5.4-pro — max performance</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini — fast ($0.75/$3.00)</option>
+            <option value="gpt-5.4-nano">gpt-5.4-nano — cheapest</option>
           </optgroup>
           <optgroup label="GPT-4o">
             <option value="gpt-4o">gpt-4o — great balance</option>
@@ -728,28 +811,40 @@ function OpenAIConfig({
           className={INPUT_CLASS}
         />
       </div>
-      <div>
+
+      {/* ── API Key + Test ── */}
+      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
         <button
           type="button"
           onClick={() => setShowApiKey(!showApiKey)}
-          className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 transition-colors"
+          className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors"
         >
-          <ChevronRight
-            className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`}
-          />
+          <Key className="w-3.5 h-3.5" />
+          <ChevronRight className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`} />
           API Key Override (optional)
         </button>
         {showApiKey && (
-          <div className="mt-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-... (uses OPENAI_API_KEY env var if empty)"
-              className={INPUT_CLASS}
-            />
-          </div>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-... (uses OPENAI_API_KEY env var if empty)"
+            className={INPUT_CLASS}
+          />
         )}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleTestKey}
+            disabled={keyStatus === 'testing'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {keyStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+            Test API Key
+          </button>
+          {keyStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+          {keyStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+        </div>
       </div>
     </div>
   )
@@ -913,6 +1008,8 @@ function ClaudeCodeConfig({
   const [script, setScript] = useState<string | null>(null)
   const [scriptLoading, setScriptLoading] = useState(false)
   const [scriptCopied, setScriptCopied] = useState(false)
+  const [cliStatus, setCliStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [cliMsg, setCliMsg] = useState('')
 
   useEffect(() => {
     const c: Record<string, unknown> = { model, maxTurns: parseInt(maxTurns) || 5, workDir }
@@ -921,12 +1018,41 @@ function ClaudeCodeConfig({
     onChange(c)
   }, [model, systemPrompt, maxTurns, workDir, tools])
 
+  const handleCheckCli = async () => {
+    setCliStatus('checking')
+    setCliMsg('')
+    try {
+      const r = await testCli('claude-code')
+      if (r.installed) { setCliStatus('ok'); setCliMsg(r.version || 'installed') }
+      else { setCliStatus('error'); setCliMsg(r.error || 'Not installed') }
+    } catch { setCliStatus('error'); setCliMsg('Check failed') }
+  }
+
   return (
     <div className="space-y-3">
-      <InfoBox variant="yellow">
-        Requires <code className="font-mono bg-white/10 px-1 rounded">claude</code> CLI:{' '}
-        <code className="font-mono bg-white/10 px-1 rounded">npm install -g @anthropic-ai/claude-code</code>
-      </InfoBox>
+      {/* ── CLI Check ── */}
+      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+        <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+          <Terminal className="w-3.5 h-3.5" />
+          Installation Check
+        </p>
+        <p className="text-xs text-slate-500">
+          Install: <code className="font-mono bg-white/10 px-1 rounded">npm install -g @anthropic-ai/claude-code</code>
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCheckCli}
+            disabled={cliStatus === 'checking'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
+            Check claude CLI
+          </button>
+          {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+          {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+        </div>
+      </div>
       <div>
         <label className={LABEL_CLASS}>Model</label>
         <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
@@ -1038,13 +1164,20 @@ function ClaudeCodeConfig({
 function OpenAICodexConfig({
   config,
   onChange,
+  agentId,
 }: {
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
+  agentId?: string
 }) {
   const [mode, setMode] = useState((config.mode as string) || 'full-auto')
   const [workDir, setWorkDir] = useState((config.workDir as string) || '/tmp')
   const [apiKey, setApiKey] = useState((config.apiKeyOverride as string) || '')
+  const [cliStatus, setCliStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [cliMsg, setCliMsg] = useState('')
+  const [script, setScript] = useState<string | null>(null)
+  const [scriptLoading, setScriptLoading] = useState(false)
+  const [scriptCopied, setScriptCopied] = useState(false)
 
   useEffect(() => {
     const c: Record<string, unknown> = { mode, workDir }
@@ -1052,12 +1185,42 @@ function OpenAICodexConfig({
     onChange(c)
   }, [mode, workDir, apiKey])
 
+  const handleCheckCli = async () => {
+    setCliStatus('checking')
+    setCliMsg('')
+    try {
+      const r = await testCli('openai-codex')
+      if (r.installed) { setCliStatus('ok'); setCliMsg(r.version || 'installed') }
+      else { setCliStatus('error'); setCliMsg(r.error || 'Not installed') }
+    } catch { setCliStatus('error'); setCliMsg('Check failed') }
+  }
+
   return (
     <div className="space-y-3">
-      <InfoBox variant="yellow">
-        Requires <code className="font-mono bg-white/10 px-1 rounded">codex</code> CLI:{' '}
-        <code className="font-mono bg-white/10 px-1 rounded">npm install -g @openai/codex</code>
-      </InfoBox>
+      {/* ── CLI Check ── */}
+      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+        <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+          <Terminal className="w-3.5 h-3.5" />
+          Installation Check
+        </p>
+        <p className="text-xs text-slate-500">
+          Install: <code className="font-mono bg-white/10 px-1 rounded">npm install -g @openai/codex</code>
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCheckCli}
+            disabled={cliStatus === 'checking'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
+            Check codex CLI
+          </button>
+          {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+          {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+        </div>
+      </div>
+
       <div>
         <label className={LABEL_CLASS}>Mode</label>
         <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT_CLASS}>
@@ -1086,6 +1249,57 @@ function OpenAICodexConfig({
           className={INPUT_CLASS}
         />
       </div>
+
+      {/* Remote Connector Script */}
+      <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-300">Remote Machine Connector</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Run Codex on another machine. Script polls AgentHub for tasks and executes them locally.
+            </p>
+          </div>
+          {agentId && (
+            <button
+              type="button"
+              onClick={async () => {
+                setScriptLoading(true)
+                try {
+                  const r = await getAgentConnectorScript(agentId)
+                  setScript(r.data.script)
+                } catch { /* ignore */ }
+                finally { setScriptLoading(false) }
+              }}
+              disabled={scriptLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
+            >
+              {scriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Generate Script
+            </button>
+          )}
+          {!agentId && <span className="text-xs text-slate-600 italic">Save agent first</span>}
+        </div>
+        {script && (
+          <div className="space-y-2">
+            <div className="relative">
+              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono whitespace-pre-wrap">
+                {script}
+              </pre>
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(script); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 1500) }}
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <Copy className="w-3 h-3" />
+                {scriptCopied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-600">
+              On the remote machine: <code className="font-mono">chmod +x connector.sh && HUB_API_KEY=your-key ./connector.sh</code>
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1102,6 +1316,8 @@ function CursorConfig({
   const [workDir, setWorkDir] = useState((config.workDir as string) || '/tmp')
   const [outputFormat, setOutputFormat] = useState((config.outputFormat as string) || 'text')
   const [apiKey, setApiKey] = useState((config.apiKey as string) || '')
+  const [cliStatus, setCliStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [cliMsg, setCliMsg] = useState('')
 
   useEffect(() => {
     const c: Record<string, unknown> = { workDir, outputFormat }
@@ -1109,19 +1325,42 @@ function CursorConfig({
     onChange(c)
   }, [workDir, outputFormat, apiKey])
 
+  const handleCheckCli = async () => {
+    setCliStatus('checking')
+    setCliMsg('')
+    try {
+      const r = await testCli('cursor')
+      if (r.installed) { setCliStatus('ok'); setCliMsg(r.version || 'installed') }
+      else { setCliStatus('error'); setCliMsg(r.error || 'Not installed') }
+    } catch { setCliStatus('error'); setCliMsg('Check failed') }
+  }
+
   return (
     <div className="space-y-3">
-      <InfoBox variant="yellow">
-        Requires Cursor installed with CLI access.{' '}
-        <a
-          href="https://cursor.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:opacity-80"
-        >
-          cursor.com
-        </a>
-      </InfoBox>
+      {/* ── CLI Check ── */}
+      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+        <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+          <Terminal className="w-3.5 h-3.5" />
+          Installation Check
+        </p>
+        <p className="text-xs text-slate-500">
+          Install Cursor from{' '}
+          <a href="https://cursor.com" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80">cursor.com</a>
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCheckCli}
+            disabled={cliStatus === 'checking'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
+            Check cursor CLI
+          </button>
+          {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+          {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+        </div>
+      </div>
       <div>
         <label className={LABEL_CLASS}>Working Directory</label>
         <input
@@ -1174,10 +1413,11 @@ function OpenClawConfig({
   const [testMsg, setTestMsg] = useState('')
   const [soulMd, setSoulMd] = useState<string | null>(null)
   const [heartbeatMd, setHeartbeatMd] = useState<string | null>(null)
+  const [bootstrapMd, setBootstrapMd] = useState<string | null>(null)
   const [hubPrompt, setHubPrompt] = useState<string | null>(null)
   const [soulLoading, setSoulLoading] = useState(false)
   const [promptLoading, setPromptLoading] = useState(false)
-  const [activeDoc, setActiveDoc] = useState<'soul' | 'heartbeat' | 'prompt'>('soul')
+  const [activeDoc, setActiveDoc] = useState<'bootstrap' | 'soul' | 'heartbeat' | 'prompt'>('bootstrap')
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -1207,13 +1447,15 @@ function OpenClawConfig({
     }
   }
 
-  const handleGenerateSoul = async () => {
+  const handleGenerateAll = async () => {
     if (!agentId) return
     setSoulLoading(true)
     try {
       const result = await getAgentSoulMd(agentId)
       setSoulMd(result.data.soulMd)
       setHeartbeatMd(result.data.heartbeatMd)
+      setBootstrapMd(result.data.bootstrapMd)
+      setActiveDoc('bootstrap')
     } catch {
       // ignore
     } finally {
@@ -1240,6 +1482,28 @@ function OpenClawConfig({
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
+
+  const handleDownload = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/plain; charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const activeContent =
+    activeDoc === 'soul' ? soulMd
+    : activeDoc === 'heartbeat' ? heartbeatMd
+    : activeDoc === 'bootstrap' ? bootstrapMd
+    : hubPrompt
+
+  const activeFilename =
+    activeDoc === 'soul' ? 'SOUL.md'
+    : activeDoc === 'heartbeat' ? 'HEARTBEAT.md'
+    : activeDoc === 'bootstrap' ? 'BOOTSTRAP.md'
+    : 'hub-prompt.txt'
 
   return (
     <div className="space-y-3">
@@ -1326,81 +1590,108 @@ function OpenClawConfig({
         )}
       </div>
 
-      {/* Hub Integration — SOUL.md / HEARTBEAT.md */}
-      <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
+      {/* Hub Integration Files — BOOTSTRAP.md / SOUL.md / HEARTBEAT.md (Paperclip-style) */}
+      <div className="border border-accent-purple/30 rounded-xl p-4 space-y-3 bg-accent-purple/5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-slate-300">Hub Integration Files</p>
+            <p className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+              <Plug className="w-3.5 h-3.5 text-accent-purple" />
+              Hub Onboarding Files
+            </p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Drop SOUL.md + HEARTBEAT.md in your OpenClaw workspace so it knows how to connect to AgentHub.
+              Generate BOOTSTRAP.md (invite prompt), SOUL.md, and HEARTBEAT.md — drop them in your OpenClaw workspace.
             </p>
           </div>
-          {agentId && (
+          {agentId ? (
             <div className="flex gap-2 shrink-0">
               <button
                 type="button"
-                onClick={handleGenerateSoul}
+                onClick={handleGenerateAll}
                 disabled={soulLoading}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-accent-purple hover:bg-purple-600 text-white rounded-lg transition-colors disabled:opacity-50"
               >
                 {soulLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                SOUL.md
+                Generate
               </button>
               <button
                 type="button"
                 onClick={handleGeneratePrompt}
                 disabled={promptLoading}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
               >
                 {promptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
                 Hub Prompt
               </button>
             </div>
-          )}
-          {!agentId && (
-            <span className="text-xs text-slate-600 italic">Save agent first to generate</span>
+          ) : (
+            <span className="text-xs text-slate-600 italic">Save agent first</span>
           )}
         </div>
 
-        {(soulMd || hubPrompt) && (
+        {(bootstrapMd || soulMd || hubPrompt) && (
           <div className="space-y-3">
-            <div className="flex gap-2 flex-wrap">
+            {/* Tab bar */}
+            <div className="flex gap-1.5 flex-wrap">
+              {bootstrapMd && (
+                <button type="button" onClick={() => setActiveDoc('bootstrap')}
+                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'bootstrap' ? 'border-accent-purple/50 bg-accent-purple/20 text-accent-purple font-semibold' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
+                  📦 BOOTSTRAP.md
+                </button>
+              )}
               {soulMd && (
                 <button type="button" onClick={() => setActiveDoc('soul')}
                   className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'soul' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  SOUL.md
+                  🌟 SOUL.md
                 </button>
               )}
               {heartbeatMd && (
                 <button type="button" onClick={() => setActiveDoc('heartbeat')}
                   className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'heartbeat' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  HEARTBEAT.md
+                  💓 HEARTBEAT.md
                 </button>
               )}
               {hubPrompt && (
                 <button type="button" onClick={() => setActiveDoc('prompt')}
                   className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'prompt' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  Hub Prompt
+                  🔌 Hub Prompt
                 </button>
               )}
             </div>
+
+            {/* Content viewer */}
             <div className="relative">
-              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-48 font-mono whitespace-pre-wrap">
-                {activeDoc === 'soul' ? soulMd : activeDoc === 'heartbeat' ? heartbeatMd : hubPrompt}
+              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-52 font-mono whitespace-pre-wrap">
+                {activeContent}
               </pre>
-              <button
-                type="button"
-                onClick={() => handleCopy((activeDoc === 'soul' ? soulMd : activeDoc === 'heartbeat' ? heartbeatMd : hubPrompt)!)}
-                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
-              >
-                <Copy className="w-3 h-3" />
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
+              <div className="absolute top-2 right-2 flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => activeContent && handleCopy(activeContent)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => activeContent && handleDownload(activeContent, activeFilename)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  Download
+                </button>
+              </div>
             </div>
+
+            {/* Context hint */}
             <p className="text-xs text-slate-600">
-              {activeDoc === 'prompt'
-                ? 'Paste this prompt into OpenClaw\'s system configuration or SOUL.md.'
-                : 'Place these files in your OpenClaw workspace directory (e.g., ~/openclaw/workspace/).'}
+              {activeDoc === 'bootstrap'
+                ? '📦 Drop BOOTSTRAP.md in ~/.openclaw/agents/<name>/ — agent reads it on first boot, then delete it.'
+                : activeDoc === 'soul'
+                ? '🌟 Drop SOUL.md in ~/.openclaw/agents/<name>/ — loaded at the start of every session.'
+                : activeDoc === 'heartbeat'
+                ? '💓 Drop HEARTBEAT.md in ~/.openclaw/agents/<name>/ — defines how AgentHub calls this agent.'
+                : '🔌 Paste this Hub Prompt into OpenClaw\'s system configuration or SOUL.md.'}
             </p>
           </div>
         )}
@@ -1797,7 +2088,7 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
       case 'internal':    return <InternalConfig config={typeConfig} onChange={setTypeConfig} />
       case 'bash':        return <BashConfig config={typeConfig} onChange={setTypeConfig} />
       case 'claude-code': return <ClaudeCodeConfig config={typeConfig} onChange={setTypeConfig} agentId={agent?.id} />
-      case 'openai-codex':return <OpenAICodexConfig config={typeConfig} onChange={setTypeConfig} />
+      case 'openai-codex':return <OpenAICodexConfig config={typeConfig} onChange={setTypeConfig} agentId={agent?.id} />
       case 'cursor':      return <CursorConfig config={typeConfig} onChange={setTypeConfig} />
       case 'openclaw':    return <OpenClawConfig config={typeConfig} onChange={setTypeConfig} agentId={agent?.id} />
       case 'a2a':         return <A2AConfig config={typeConfig} onChange={setTypeConfig} />

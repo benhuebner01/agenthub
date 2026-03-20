@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { z } from 'zod';
 import { db } from '../db';
 import { agents, runs, schedules, agentCalls, agentMemory } from '../db/schema';
@@ -7,6 +9,9 @@ import { executeAgent } from '../services/executor';
 import { checkBudget, recordSpend } from '../services/budget';
 import { scheduleAgent, removeSchedule } from '../services/scheduler';
 import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
+
+const execAsync = promisify(exec);
 
 const router = Router();
 
@@ -23,6 +28,103 @@ const createAgentSchema = z.object({
 });
 
 const updateAgentSchema = createAgentSchema.partial();
+
+// ─── POST /api/agents/test-cli ────────────────────────────────────────────────
+// Tests whether a local CLI tool (claude, codex, cursor) is installed and returns version.
+// Must be placed BEFORE /:id routes to avoid routing conflicts.
+
+router.post('/test-cli', async (req: Request, res: Response) => {
+  try {
+    const { type } = req.body as { type: string };
+    const cliCommands: Record<string, string> = {
+      'claude-code':    'claude --version',
+      'openai-codex':   'codex --version',
+      'cursor':         'cursor --version',
+    };
+    const installHints: Record<string, string> = {
+      'claude-code':  'npm install -g @anthropic-ai/claude-code',
+      'openai-codex': 'npm install -g @openai/codex',
+      'cursor':       'Install from https://cursor.com',
+    };
+    const cmd = cliCommands[type];
+    if (!cmd) {
+      res.status(400).json({ error: `Unknown CLI type: ${type}` });
+      return;
+    }
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 6000 });
+      const version = (stdout || stderr).trim().split('\n')[0] || 'installed';
+      res.json({ installed: true, version });
+    } catch {
+      res.json({ installed: false, error: `Not found. Install: ${installHints[type]}`, hint: installHints[type] });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/agents/test-api-key ───────────────────────────────────────────
+// Verifies an API key by making a minimal real API call.
+
+router.post('/test-api-key', async (req: Request, res: Response) => {
+  try {
+    const { provider, apiKey } = req.body as { provider: string; apiKey: string };
+    if (!provider || !apiKey) {
+      res.status(400).json({ error: 'provider and apiKey are required' });
+      return;
+    }
+
+    if (provider === 'anthropic') {
+      const Anthropic = require('@anthropic-ai/sdk');
+      const client = new Anthropic.default({ apiKey });
+      const resp = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'Hi' }],
+      });
+      res.json({ valid: true, model: resp.model });
+    } else if (provider === 'openai') {
+      const OpenAI = require('openai');
+      const client = new OpenAI.default({ apiKey });
+      const models = await client.models.list();
+      const count = models.data?.length || 0;
+      res.json({ valid: true, modelCount: count });
+    } else {
+      res.status(400).json({ error: `Unknown provider: ${provider}` });
+    }
+  } catch (err: any) {
+    // API errors (invalid key, etc.) come here
+    const msg = err?.error?.message || err?.message || 'Invalid API key';
+    res.json({ valid: false, error: msg });
+  }
+});
+
+// ─── POST /api/agents/test-http-endpoint ─────────────────────────────────────
+// Checks whether an HTTP endpoint is reachable.
+
+router.post('/test-http-endpoint', async (req: Request, res: Response) => {
+  try {
+    const { url, headers } = req.body as { url: string; headers?: Record<string, string> };
+    if (!url) {
+      res.status(400).json({ error: 'url is required' });
+      return;
+    }
+    try {
+      const resp = await axios.request({
+        method: 'HEAD',
+        url,
+        headers: headers || {},
+        timeout: 6000,
+        validateStatus: () => true, // never throw on HTTP status
+      });
+      res.json({ reachable: resp.status < 500, status: resp.status, statusText: resp.statusText });
+    } catch (err: any) {
+      res.json({ reachable: false, error: err.message });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/agents
 router.get('/', async (req: Request, res: Response) => {
@@ -764,12 +866,101 @@ Content-Type: application/json
 GET http://${host}:${port}/api/health  → sollte 200 OK zurückgeben
 `;
 
+    // BOOTSTRAP.md — the "invite prompt" (Paperclip-style)
+    // Placed in ~/.openclaw/agents/<name>/BOOTSTRAP.md
+    // OpenClaw reads it once on first boot, then the user deletes it.
+    const bootstrapMd = `# BOOTSTRAP.md — AgentHub Onboarding für ${agent.name}
+
+> Lies diese Datei einmal komplett. Danach kannst du sie löschen (\`rm BOOTSTRAP.md\`).
+
+## Wer bist du?
+Du bist **${agent.name}**, ein ${agent.role || 'worker'}-Agent in AgentHub.${agent.jobDescription ? `\nDeine Aufgabe: ${agent.jobDescription}` : ''}${agent.description ? `\nBeschreibung: ${agent.description}` : ''}
+
+## Dein Hub
+AgentHub ist dein Orchestrations-Hub — er weist dir Aufgaben zu, trackt deine Kosten und speichert deine Ergebnisse.
+
+- Hub-URL: http://${hubHost}:${hubPort}
+- Deine Agent-ID: \`${agent.id}\`
+
+## Wie du Aufgaben bekommst
+AgentHub ruft dich direkt auf:
+
+\`\`\`
+POST http://${host}:${port}/api/agent/run
+Content-Type: application/json
+
+{
+  "prompt": "<dein Kontext + Aufgabenbeschreibung>",
+  "model": "${ocModel || 'auto'}"
+}
+\`\`\`
+
+Das \`prompt\`-Feld enthält alles, was du wissen musst: wer du bist, was die Aufgabe ist, und optional eine runId.
+
+## Wie du Ergebnisse zurückmeldest
+
+\`\`\`
+POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result
+Content-Type: application/json
+
+{
+  "output": "Aufgabe abgeschlossen: ...",
+  "runId": "<runId aus dem prompt, falls vorhanden>",
+  "success": true
+}
+\`\`\`
+
+## Nächste Aufgabe selbst abfragen (optional)
+
+\`\`\`
+GET http://${hubHost}:${hubPort}/api/agents/${agent.id}/next-task
+\`\`\`
+
+## Deine Workspace-Dateien
+- **SOUL.md** — Deine Identität, Werte und Verhaltensregeln (wird bei jedem Start geladen)
+- **HEARTBEAT.md** — Protokoll für eingehende Hub-Anfragen
+- **BOOTSTRAP.md** — Diese Datei (einmalig, danach löschen)
+
+## Sofort-Aufgabe
+Bestätige deine Bereitschaft mit einer kurzen Antwort und melde sie an den Hub:
+
+\`\`\`bash
+curl -X POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result \\
+  -H "Content-Type: application/json" \\
+  -d '{"output": "Agent ${agent.name} bereit. Warte auf Aufgaben.", "success": true}'
+\`\`\`
+
+---
+*Generiert von AgentHub — ${new Date().toISOString()}*
+`;
+
+    // Support ?download=true for direct file download
+    if (req.query.download === 'soul') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="SOUL.md"`);
+      res.send(soulMd);
+      return;
+    }
+    if (req.query.download === 'heartbeat') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="HEARTBEAT.md"`);
+      res.send(heartbeatMd);
+      return;
+    }
+    if (req.query.download === 'bootstrap') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="BOOTSTRAP.md"`);
+      res.send(bootstrapMd);
+      return;
+    }
+
     res.json({
       data: {
         agentId: agent.id,
         agentName: agent.name,
         soulMd,
         heartbeatMd,
+        bootstrapMd,
       },
     });
   } catch (err: any) {
