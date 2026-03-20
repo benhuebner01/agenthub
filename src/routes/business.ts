@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { agents, organizations, proposals, runs } from '../db/schema';
 import { eq, desc, and, gte, sql } from 'drizzle-orm';
-import { executeAgent } from '../services/executor';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -71,8 +70,8 @@ COST TABLE (per 1M tokens):
 - claude-opus-4-6: $5 input / $25 output
 - claude-sonnet-4-6: $3 input / $15 output
 - claude-haiku-4-5: $1 input / $5 output
-- gpt-5.4: $2 input / $10 output
-- gpt-5.4-mini: $0.20 input / $1.25 output
+- gpt-5.4: $2.50 input / $15 output
+- gpt-5.4-mini: $0.75 input / $3.00 output
 - gpt-5.4-nano: $0.10 input / $0.50 output
 - http/bash/openclaw/a2a/mcp: $0 (no token cost)
 
@@ -356,23 +355,37 @@ For restructuring or strategy proposals:
 
 Analyze the situation and respond to: ${userInput || 'Please analyze our current organizational performance and recommend improvements.'}`;
 
-    // Override the CEO's system prompt for this run
-    const originalConfig = (ceoAgent.config as Record<string, unknown>) || {};
-    const runConfig = { ...originalConfig, system_prompt: ceoSystemPrompt };
+    // Use callAI directly — works with any available API key (Anthropic or OpenAI),
+    // independent of the CEO agent's stored type so there's no SDK mismatch error.
+    const ceoOutput = await callAI(
+      ceoSystemPrompt,
+      userInput || 'Analyze organizational performance and recommend improvements.',
+    );
 
-    // Temporarily patch agent config for this run
-    await db.update(agents)
-      .set({ config: runConfig, updatedAt: new Date().toISOString() })
-      .where(eq(agents.id, ceoAgent.id));
+    // Parse any <proposal> blocks the CEO produced and save them
+    const proposalRegex = /<proposal>([\s\S]*?)<\/proposal>/g;
+    let match;
+    while ((match = proposalRegex.exec(ceoOutput)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1].trim());
+        await db.insert(proposals).values({
+          id: uuidv4(),
+          organizationId: orgId,
+          proposedByAgentId: ceoAgent.id,
+          type: parsed.type || 'strategy',
+          title: parsed.title || 'Untitled Proposal',
+          details: parsed,
+          reasoning: parsed.reasoning || null,
+          estimatedCostUsd: parsed.estimatedMonthlyCostUsd || parsed.estimatedCostUsd || null,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        });
+      } catch {
+        // Malformed JSON — skip
+      }
+    }
 
-    const result = await executeAgent(ceoAgent.id, userInput || 'Analyze organizational performance and recommend improvements.', 'api');
-
-    // Restore original config
-    await db.update(agents)
-      .set({ config: originalConfig, updatedAt: new Date().toISOString() })
-      .where(eq(agents.id, ceoAgent.id));
-
-    res.json({ data: result });
+    res.json({ data: { success: true, output: ceoOutput, tokensUsed: 0, costUsd: 0 } });
   } catch (err: any) {
     console.error('[Business] POST /organizations/:id/ceo-run error:', err);
     res.status(500).json({ error: 'Failed to run CEO agent', details: err.message });
