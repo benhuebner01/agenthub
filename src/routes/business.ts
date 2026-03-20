@@ -24,7 +24,7 @@ async function callAI(systemPrompt: string, userMessage: string): Promise<string
     const OpenAI = require('openai');
     const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
     const resp = await client.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5.4',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
@@ -47,41 +47,50 @@ router.post('/analyze', async (req: Request, res: Response) => {
     }
 
     const goalsStr = Array.isArray(goals) ? goals.join('\n- ') : (goals || 'General productivity');
-    const connectionsStr = Array.isArray(availableConnections) && availableConnections.length > 0
-      ? availableConnections.join(', ')
-      : 'claude, openai, http, bash';
 
-    const systemPrompt = `You are an expert AI business consultant and system architect.
-Your job is to analyze a business and design an optimal AI agent organization.
+    const systemPrompt = `You are an expert AI business architect designing agent organizations — like Paperclip AI but better.
 
-Available agent types and their capabilities:
-- claude: Anthropic Claude AI (reasoning, writing, analysis, complex tasks)
-- openai: OpenAI GPT models (reasoning, writing, code generation)
-- http: HTTP webhook agent (call external APIs and services)
-- bash: Bash command agent (run shell scripts, system tasks)
-- internal: Internal AgentHub AI (system management, orchestration)
-- claude-code: Claude Code CLI (coding tasks, repository management)
-- a2a: Agent-to-Agent protocol (communicate with other AI agents)
+HIERARCHY RULES (strict):
+- Exactly 1 CEO at the root. Every agent reports to exactly one manager.
+- Tree structure: CEO → Managers → Workers/Specialists
+- No agent can have multiple managers.
+- The CEO's mission is the company goal — every agent's job traces back to it.
 
-Roles available:
-- ceo: Top-level strategic agent, manages the whole org, proposes new hires
-- manager: Mid-level agent that oversees workers in a domain
-- worker: Executes specific tasks
-- specialist: Expert in a narrow domain
+AGENT TYPES:
+- claude: Anthropic Claude (reasoning, writing, strategy, analysis) — best for CEO/managers
+- openai: OpenAI GPT-5.4 (writing, code, general tasks)
+- http: HTTP webhook (trigger n8n, Zapier, external APIs)
+- bash: Shell/Python scripts (data processing, automation)
+- claude-code: Claude Code CLI (autonomous coding, repo management)
+- openclaw: OpenClaw local agent (runs on user machine, OpenAI-compatible API)
+- a2a: Agent-to-Agent protocol (any A2A-compatible external agent)
+- mcp: MCP server tool (filesystem, GitHub, search via Model Context Protocol)
+- internal: Built-in AgentHub AI (orchestration, platform management)
 
-You must respond with ONLY valid JSON matching exactly this structure (no markdown, no explanation):
+COST TABLE (per 1M tokens):
+- claude-opus-4-6: $5 input / $25 output
+- claude-sonnet-4-6: $3 input / $15 output
+- claude-haiku-4-5: $1 input / $5 output
+- gpt-5.4: $2 input / $10 output
+- gpt-5.4-mini: $0.20 input / $1.25 output
+- gpt-5.4-nano: $0.10 input / $0.50 output
+- http/bash/openclaw/a2a/mcp: $0 (no token cost)
+
+DESIGN PRINCIPLES:
+1. CEO should use claude-sonnet-4-6 (best strategic reasoning)
+2. High-volume workers should use cheaper models (gpt-5.4-mini, haiku, or http/bash)
+3. Propose 1 CEO + 3-6 team agents (don't over-staff)
+4. Each agent's jobDescription must be specific and mission-driven
+5. Include costBreakdown: realistic token estimate per agent per month
+
+Respond with ONLY valid JSON, no markdown:
 {
-  "organization": {
-    "name": "string",
-    "description": "string",
-    "industry": "string",
-    "goals": ["string"]
-  },
+  "organization": { "name": "string", "description": "string", "industry": "string", "goals": ["string"] },
   "ceoAgent": {
     "name": "string",
     "description": "string",
-    "type": "claude|openai|internal",
-    "config": {},
+    "type": "claude",
+    "config": { "model": "claude-sonnet-4-6", "system_prompt": "You are the CEO of [company]. Mission: [goals]. Your team: [agents]." },
     "jobDescription": "string"
   },
   "proposedTeam": [
@@ -89,11 +98,14 @@ You must respond with ONLY valid JSON matching exactly this structure (no markdo
       "name": "string",
       "role": "manager|worker|specialist",
       "description": "string",
-      "type": "claude|openai|http|bash|internal",
-      "config": {},
+      "type": "claude|openai|http|bash|claude-code|openclaw|a2a|mcp|internal",
+      "config": { "model": "gpt-5.4" },
       "jobDescription": "string",
       "reportsTo": "ceo|<agentName>"
     }
+  ],
+  "costBreakdown": [
+    { "agentName": "string", "model": "string", "estimatedMonthlyTokens": number, "estimatedMonthlyCostUsd": number }
   ],
   "reasoning": "string",
   "estimatedMonthlyCostUsd": number,
@@ -106,9 +118,8 @@ Industry: ${industry || 'Not specified'}
 Description: ${description}
 Goals:
 - ${goalsStr}
-Available integrations: ${connectionsStr}
 
-Design the optimal AI agent organization for this business. Include 1 CEO and 3-6 team agents.`;
+Design the optimal strict-hierarchy AI agent organization. Include 1 CEO and 3-6 team agents. Be specific about job descriptions and choose the most cost-efficient agent types.`;
 
     const rawResponse = await callAI(systemPrompt, userMessage);
 

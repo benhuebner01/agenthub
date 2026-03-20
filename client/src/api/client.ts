@@ -308,6 +308,11 @@ export const setAgentMemory = (agentId: string, key: string, value: string) =>
 export const deleteAgentMemory = (agentId: string, key: string) =>
   api.delete<{ message: string }>(`/agents/${agentId}/memory/${key}`).then((r) => r.data)
 
+export const getAgentSoulMd = (agentId: string) =>
+  api.get<{ data: { agentId: string; agentName: string; soulMd: string; heartbeatMd: string } }>(
+    `/agents/${agentId}/soul-md`
+  ).then((r) => r.data)
+
 // ─── Runs ─────────────────────────────────────────────────────────────────────
 
 export const getRuns = (params?: {

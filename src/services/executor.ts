@@ -18,9 +18,10 @@ const CLAUDE_MODELS = {
 };
 
 const OPENAI_MODELS = {
+  'gpt-5.4': { inputCostPerMTok: 2.0, outputCostPerMTok: 10 },
   'gpt-5.4-pro': { inputCostPerMTok: 2.5, outputCostPerMTok: 15 },
-  'gpt-5.4-nano': { inputCostPerMTok: 0.2, outputCostPerMTok: 1.25 },
   'gpt-5.4-mini': { inputCostPerMTok: 0.2, outputCostPerMTok: 1.25 },
+  'gpt-5.4-nano': { inputCostPerMTok: 0.1, outputCostPerMTok: 0.5 },
   'gpt-4o': { inputCostPerMTok: 2.5, outputCostPerMTok: 10 },
   'gpt-4o-mini': { inputCostPerMTok: 0.15, outputCostPerMTok: 0.6 },
   'o3': { inputCostPerMTok: 2, outputCostPerMTok: 8 },
@@ -173,7 +174,7 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
   }
 
   const client = new OpenAI({ apiKey });
-  const model = (config.model as string) || 'gpt-4o';
+  const model = (config.model as string) || 'gpt-5.4';
   const baseSystemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
   const systemPrompt = baseSystemPrompt + memoryContext;
 
@@ -410,7 +411,7 @@ async function executeInternalAgent(config: Record<string, unknown>, input: unkn
   } else {
     const OpenAI = require('openai');
     const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
-    const model = (config.model as string) || 'gpt-4o';
+    const model = (config.model as string) || 'gpt-5.4';
     const baseSystemPrompt = (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.';
     const systemPrompt = baseSystemPrompt + memoryContext;
     const resp = await client.chat.completions.create({

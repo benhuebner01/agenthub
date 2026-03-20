@@ -10,6 +10,7 @@ import {
   getPresets,
   discoverOpenclaw,
   fetchA2ACard,
+  getAgentSoulMd,
 } from '../api/client'
 import { useToast } from './Toaster'
 import {
@@ -23,6 +24,8 @@ import {
   Loader2,
   ExternalLink,
   Plug,
+  Copy,
+  FileText,
 } from 'lucide-react'
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -760,61 +763,41 @@ function InternalConfig({
   onChange: (c: Record<string, unknown>) => void
 }) {
   const [provider, setProvider] = useState((config.provider as string) || 'auto')
-  const [model, setModel] = useState((config.model as string) || '')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
-
-  const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001']
-  const openaiModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-5.4-pro', 'gpt-5.4-nano', 'o3']
 
   useEffect(() => {
     const c: Record<string, unknown> = { systemPrompt }
     if (provider !== 'auto') c.provider = provider
-    if (model) c.model = model
     onChange(c)
-  }, [provider, model, systemPrompt])
+  }, [provider, systemPrompt])
+
+  const modelLabel = provider === 'openai'
+    ? 'gpt-5.4 (auto-selected)'
+    : provider === 'anthropic'
+    ? 'claude-sonnet-4-6 (auto-selected)'
+    : 'auto-detected from API keys'
 
   return (
     <div className="space-y-3">
       <InfoBox variant="purple">
-        Uses whichever API key is configured in your environment. No extra setup needed.
+        Uses whichever API key is configured in your environment. Model is automatically selected for each provider.
       </InfoBox>
       <div>
         <label className={LABEL_CLASS}>Provider</label>
         <select
           value={provider}
-          onChange={(e) => {
-            setProvider(e.target.value)
-            setModel('')
-          }}
+          onChange={(e) => setProvider(e.target.value)}
           className={INPUT_CLASS}
         >
           <option value="auto">Auto-detect (use whichever key is set)</option>
           <option value="anthropic">Anthropic (Claude)</option>
-          <option value="openai">OpenAI</option>
+          <option value="openai">OpenAI (GPT)</option>
         </select>
       </div>
-      {(provider === 'anthropic' || provider === 'auto') && (
-        <div>
-          <label className={LABEL_CLASS}>Model (optional)</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-            <option value="">Default (claude-sonnet-4-6)</option>
-            {claudeModels.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-      )}
-      {provider === 'openai' && (
-        <div>
-          <label className={LABEL_CLASS}>Model (optional)</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-            <option value="">Default (gpt-4o)</option>
-            {openaiModels.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="flex items-center gap-2 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg">
+        <span className="text-xs text-slate-500">Model:</span>
+        <span className="text-xs text-slate-400 font-mono">{modelLabel}</span>
+      </div>
       <div>
         <label className={LABEL_CLASS}>System Prompt</label>
         <textarea
@@ -1118,9 +1101,11 @@ function CursorConfig({
 function OpenClawConfig({
   config,
   onChange,
+  agentId,
 }: {
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
+  agentId?: string
 }) {
   const [host, setHost] = useState((config.host as string) || 'localhost')
   const [port, setPort] = useState(String((config.port as number) || 18789))
@@ -1129,6 +1114,11 @@ function OpenClawConfig({
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [testMsg, setTestMsg] = useState('')
+  const [soulMd, setSoulMd] = useState<string | null>(null)
+  const [heartbeatMd, setHeartbeatMd] = useState<string | null>(null)
+  const [soulLoading, setSoulLoading] = useState(false)
+  const [activeDoc, setActiveDoc] = useState<'soul' | 'heartbeat'>('soul')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const c: Record<string, unknown> = { host, port: parseInt(port) || 18789, model }
@@ -1155,6 +1145,26 @@ function OpenClawConfig({
       setTestStatus('error')
       setTestMsg('Connection failed')
     }
+  }
+
+  const handleGenerateSoul = async () => {
+    if (!agentId) return
+    setSoulLoading(true)
+    try {
+      const result = await getAgentSoulMd(agentId)
+      setSoulMd(result.data.soulMd)
+      setHeartbeatMd(result.data.heartbeatMd)
+    } catch {
+      // ignore
+    } finally {
+      setSoulLoading(false)
+    }
+  }
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   return (
@@ -1243,6 +1253,69 @@ function OpenClawConfig({
             <AlertCircle className="w-3.5 h-3.5" />
             {testMsg}
           </span>
+        )}
+      </div>
+
+      {/* Hub Integration — SOUL.md / HEARTBEAT.md */}
+      <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-300">Hub Integration Files</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Drop SOUL.md + HEARTBEAT.md in your OpenClaw workspace so it knows how to connect to AgentHub.
+            </p>
+          </div>
+          {agentId && (
+            <button
+              type="button"
+              onClick={handleGenerateSoul}
+              disabled={soulLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
+            >
+              {soulLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Generate Files
+            </button>
+          )}
+          {!agentId && (
+            <span className="text-xs text-slate-600 italic">Save agent first to generate</span>
+          )}
+        </div>
+
+        {soulMd && heartbeatMd && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveDoc('soul')}
+                className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'soul' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}
+              >
+                SOUL.md
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDoc('heartbeat')}
+                className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'heartbeat' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}
+              >
+                HEARTBEAT.md
+              </button>
+            </div>
+            <div className="relative">
+              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-48 font-mono whitespace-pre-wrap">
+                {activeDoc === 'soul' ? soulMd : heartbeatMd}
+              </pre>
+              <button
+                type="button"
+                onClick={() => handleCopy(activeDoc === 'soul' ? soulMd : heartbeatMd!)}
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <Copy className="w-3 h-3" />
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-600">
+              Place these files in your OpenClaw workspace directory (e.g., <code className="font-mono">~/openclaw/workspace/</code>).
+            </p>
+          </div>
         )}
       </div>
     </div>
@@ -1639,7 +1712,7 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
       case 'claude-code': return <ClaudeCodeConfig config={typeConfig} onChange={setTypeConfig} />
       case 'openai-codex':return <OpenAICodexConfig config={typeConfig} onChange={setTypeConfig} />
       case 'cursor':      return <CursorConfig config={typeConfig} onChange={setTypeConfig} />
-      case 'openclaw':    return <OpenClawConfig config={typeConfig} onChange={setTypeConfig} />
+      case 'openclaw':    return <OpenClawConfig config={typeConfig} onChange={setTypeConfig} agentId={agent?.id} />
       case 'a2a':         return <A2AConfig config={typeConfig} onChange={setTypeConfig} />
       case 'mcp':         return <McpConfig config={typeConfig} onChange={setTypeConfig} />
       default:            return null

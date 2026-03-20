@@ -418,4 +418,101 @@ router.post('/:id/delegate', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/agents/:id/soul-md ─────────────────────────────────────────────
+
+router.get('/:id/soul-md', async (req: Request, res: Response) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+
+    const config = (agent.config as Record<string, unknown>) || {};
+    const host = (config.host as string) || 'localhost';
+    const port = (config.port as number) || 18789;
+    const hubPort = process.env.PORT || 3001;
+    const hubHost = process.env.HUB_HOST || 'localhost';
+
+    const soulMd = `# ${agent.name} — SOUL.md
+
+## Identity
+You are **${agent.name}**, a ${agent.role || 'worker'} agent.
+${agent.jobDescription ? `\nYour job: ${agent.jobDescription}` : ''}
+${agent.description ? `\nAbout you: ${agent.description}` : ''}
+
+## Hub Connection — AgentHub
+Your orchestration hub runs at: **http://${hubHost}:${hubPort}**
+Your Agent ID: \`${agent.id}\`
+
+### Receiving tasks (heartbeat)
+AgentHub will send you tasks via your OpenAI-compatible API at:
+  POST http://${host}:${port}/v1/chat/completions
+
+Tasks arrive as chat messages. The last user message is your task.
+
+### Reporting results back
+After completing a task, if you received a runId in your context, call:
+  POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/heartbeat-result
+  Headers: X-API-Key: <your-agenthub-api-key>
+  Body: { "output": "your result", "runId": "the-run-id", "success": true }
+
+### Fetching your current tasks
+  GET http://${hubHost}:${hubPort}/api/agents/${agent.id}
+  Headers: X-API-Key: <your-agenthub-api-key>
+
+## Behavior Guidelines
+- You are part of a larger AI organization. Stay focused on your role.
+- When you complete a task, always summarize what you did.
+- If you need to delegate, mention it clearly so the hub can route it.
+- Keep responses concise and structured.
+`;
+
+    const heartbeatMd = `# ${agent.name} — HEARTBEAT.md
+
+## Heartbeat Protocol
+AgentHub sends you a heartbeat to trigger work. Here is what to expect:
+
+### Incoming heartbeat format
+\`\`\`json
+{
+  "model": "${(config.model as string) || 'openclaw:main'}",
+  "messages": [
+    { "role": "system", "content": "<your soul + current task context>" },
+    { "role": "user", "content": "<task description or 'heartbeat'>" }
+  ]
+}
+\`\`\`
+
+### What to do on heartbeat
+1. Read the user message — it contains your task
+2. Execute the task using your tools and capabilities
+3. Return your result as the assistant message content
+4. If runId is present in the context, call the hub result endpoint
+
+### Result endpoint
+POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/heartbeat-result
+\`\`\`json
+{
+  "output": "Task completed: ...",
+  "runId": "optional-run-id",
+  "success": true
+}
+\`\`\`
+`;
+
+    res.json({
+      data: {
+        agentId: agent.id,
+        agentName: agent.name,
+        soulMd,
+        heartbeatMd,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Agents] GET /:id/soul-md error:', err);
+    res.status(500).json({ error: 'Failed to generate SOUL.md', details: err.message });
+  }
+});
+
 export default router;

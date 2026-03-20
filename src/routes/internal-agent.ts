@@ -91,7 +91,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       messages.push({ role: 'user', content: message.trim() });
 
       const response = await client.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'gpt-5.4',
         max_tokens: 1024,
         messages,
       });
@@ -102,7 +102,7 @@ router.post('/chat', async (req: Request, res: Response) => {
         success: true,
         message: text,
         provider: 'openai',
-        model: 'gpt-4o',
+        model: 'gpt-5.4',
       });
     }
   } catch (err) {
