@@ -313,6 +313,16 @@ export const getAgentSoulMd = (agentId: string) =>
     `/agents/${agentId}/soul-md`
   ).then((r) => r.data)
 
+export const getAgentHubPrompt = (agentId: string) =>
+  api.get<{ data: { agentId: string; agentName: string; prompt: string } }>(
+    `/agents/${agentId}/hub-prompt`
+  ).then((r) => r.data)
+
+export const getAgentConnectorScript = (agentId: string) =>
+  api.get<{ data: { agentId: string; agentName: string; script: string } }>(
+    `/agents/${agentId}/connector-script`
+  ).then((r) => r.data)
+
 // ─── Runs ─────────────────────────────────────────────────────────────────────
 
 export const getRuns = (params?: {

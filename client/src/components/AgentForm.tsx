@@ -11,6 +11,8 @@ import {
   discoverOpenclaw,
   fetchA2ACard,
   getAgentSoulMd,
+  getAgentHubPrompt,
+  getAgentConnectorScript,
 } from '../api/client'
 import { useToast } from './Toaster'
 import {
@@ -897,15 +899,20 @@ function BashConfig({
 function ClaudeCodeConfig({
   config,
   onChange,
+  agentId,
 }: {
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
+  agentId?: string
 }) {
   const [model, setModel] = useState((config.model as string) || 'claude-sonnet-4-6')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
   const [maxTurns, setMaxTurns] = useState(String((config.maxTurns as number) || 5))
   const [workDir, setWorkDir] = useState((config.workDir as string) || '/tmp')
   const [tools, setTools] = useState((config.tools as string) || '')
+  const [script, setScript] = useState<string | null>(null)
+  const [scriptLoading, setScriptLoading] = useState(false)
+  const [scriptCopied, setScriptCopied] = useState(false)
 
   useEffect(() => {
     const c: Record<string, unknown> = { model, maxTurns: parseInt(maxTurns) || 5, workDir }
@@ -970,6 +977,57 @@ function ClaudeCodeConfig({
           placeholder="Bash,Edit,Read"
           className={INPUT_CLASS + ' font-mono text-xs'}
         />
+      </div>
+
+      {/* Remote Connector Script */}
+      <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-300">Remote Machine Connector</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Run Claude Code on another machine. Script polls AgentHub for tasks and executes them locally.
+            </p>
+          </div>
+          {agentId && (
+            <button
+              type="button"
+              onClick={async () => {
+                setScriptLoading(true)
+                try {
+                  const r = await getAgentConnectorScript(agentId)
+                  setScript(r.data.script)
+                } catch { /* ignore */ }
+                finally { setScriptLoading(false) }
+              }}
+              disabled={scriptLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
+            >
+              {scriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Generate Script
+            </button>
+          )}
+          {!agentId && <span className="text-xs text-slate-600 italic">Save agent first</span>}
+        </div>
+        {script && (
+          <div className="space-y-2">
+            <div className="relative">
+              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono whitespace-pre-wrap">
+                {script}
+              </pre>
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(script); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 1500) }}
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <Copy className="w-3 h-3" />
+                {scriptCopied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-600">
+              On the remote machine: <code className="font-mono">chmod +x connector.sh && HUB_API_KEY=your-key ./connector.sh</code>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1116,8 +1174,10 @@ function OpenClawConfig({
   const [testMsg, setTestMsg] = useState('')
   const [soulMd, setSoulMd] = useState<string | null>(null)
   const [heartbeatMd, setHeartbeatMd] = useState<string | null>(null)
+  const [hubPrompt, setHubPrompt] = useState<string | null>(null)
   const [soulLoading, setSoulLoading] = useState(false)
-  const [activeDoc, setActiveDoc] = useState<'soul' | 'heartbeat'>('soul')
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [activeDoc, setActiveDoc] = useState<'soul' | 'heartbeat' | 'prompt'>('soul')
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -1158,6 +1218,20 @@ function OpenClawConfig({
       // ignore
     } finally {
       setSoulLoading(false)
+    }
+  }
+
+  const handleGeneratePrompt = async () => {
+    if (!agentId) return
+    setPromptLoading(true)
+    try {
+      const result = await getAgentHubPrompt(agentId)
+      setHubPrompt(result.data.prompt)
+      setActiveDoc('prompt')
+    } catch {
+      // ignore
+    } finally {
+      setPromptLoading(false)
     }
   }
 
@@ -1266,46 +1340,61 @@ function OpenClawConfig({
             </p>
           </div>
           {agentId && (
-            <button
-              type="button"
-              onClick={handleGenerateSoul}
-              disabled={soulLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
-            >
-              {soulLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-              Generate Files
-            </button>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleGenerateSoul}
+                disabled={soulLoading}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {soulLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                SOUL.md
+              </button>
+              <button
+                type="button"
+                onClick={handleGeneratePrompt}
+                disabled={promptLoading}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50"
+              >
+                {promptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
+                Hub Prompt
+              </button>
+            </div>
           )}
           {!agentId && (
             <span className="text-xs text-slate-600 italic">Save agent first to generate</span>
           )}
         </div>
 
-        {soulMd && heartbeatMd && (
+        {(soulMd || hubPrompt) && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveDoc('soul')}
-                className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'soul' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}
-              >
-                SOUL.md
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveDoc('heartbeat')}
-                className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'heartbeat' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}
-              >
-                HEARTBEAT.md
-              </button>
+            <div className="flex gap-2 flex-wrap">
+              {soulMd && (
+                <button type="button" onClick={() => setActiveDoc('soul')}
+                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'soul' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
+                  SOUL.md
+                </button>
+              )}
+              {heartbeatMd && (
+                <button type="button" onClick={() => setActiveDoc('heartbeat')}
+                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'heartbeat' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
+                  HEARTBEAT.md
+                </button>
+              )}
+              {hubPrompt && (
+                <button type="button" onClick={() => setActiveDoc('prompt')}
+                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'prompt' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
+                  Hub Prompt
+                </button>
+              )}
             </div>
             <div className="relative">
               <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-48 font-mono whitespace-pre-wrap">
-                {activeDoc === 'soul' ? soulMd : heartbeatMd}
+                {activeDoc === 'soul' ? soulMd : activeDoc === 'heartbeat' ? heartbeatMd : hubPrompt}
               </pre>
               <button
                 type="button"
-                onClick={() => handleCopy(activeDoc === 'soul' ? soulMd : heartbeatMd!)}
+                onClick={() => handleCopy((activeDoc === 'soul' ? soulMd : activeDoc === 'heartbeat' ? heartbeatMd : hubPrompt)!)}
                 className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
               >
                 <Copy className="w-3 h-3" />
@@ -1313,7 +1402,9 @@ function OpenClawConfig({
               </button>
             </div>
             <p className="text-xs text-slate-600">
-              Place these files in your OpenClaw workspace directory (e.g., <code className="font-mono">~/openclaw/workspace/</code>).
+              {activeDoc === 'prompt'
+                ? 'Paste this prompt into OpenClaw\'s system configuration or SOUL.md.'
+                : 'Place these files in your OpenClaw workspace directory (e.g., ~/openclaw/workspace/).'}
             </p>
           </div>
         )}
@@ -1709,7 +1800,7 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
       case 'openai':      return <OpenAIConfig config={typeConfig} onChange={setTypeConfig} />
       case 'internal':    return <InternalConfig config={typeConfig} onChange={setTypeConfig} />
       case 'bash':        return <BashConfig config={typeConfig} onChange={setTypeConfig} />
-      case 'claude-code': return <ClaudeCodeConfig config={typeConfig} onChange={setTypeConfig} />
+      case 'claude-code': return <ClaudeCodeConfig config={typeConfig} onChange={setTypeConfig} agentId={agent?.id} />
       case 'openai-codex':return <OpenAICodexConfig config={typeConfig} onChange={setTypeConfig} />
       case 'cursor':      return <CursorConfig config={typeConfig} onChange={setTypeConfig} />
       case 'openclaw':    return <OpenClawConfig config={typeConfig} onChange={setTypeConfig} agentId={agent?.id} />

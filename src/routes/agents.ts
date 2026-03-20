@@ -418,6 +418,262 @@ router.post('/:id/delegate', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/agents/:id/hub-prompt ──────────────────────────────────────────
+// Returns a complete hub connection system prompt — paste into any agent (OpenClaw, etc.)
+
+router.get('/:id/hub-prompt', async (req: Request, res: Response) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    const hubHost = process.env.HUB_HOST || 'localhost';
+    const hubPort = process.env.PORT || '3001';
+    const hubBase = `http://${hubHost}:${hubPort}/api`;
+
+    const prompt = `## AgentHub Connection
+
+You are **${agent.name}**, a ${agent.role || 'worker'} agent connected to AgentHub.
+${agent.jobDescription ? `\nYour job: ${agent.jobDescription}` : ''}
+${agent.description ? `Your description: ${agent.description}` : ''}
+
+## Hub
+- Base URL: ${hubBase}
+- Your Agent ID: \`${agent.id}\`
+- API Key header: \`X-API-Key: <your-agenthub-api-key>\`
+
+## Receiving Tasks
+AgentHub will send you tasks via the OpenAI-compatible chat completions endpoint.
+The task is always in the last \`user\` message.
+Any \`system\` message may contain additional context about the current task (runId, organization, goals).
+
+## Reporting Results
+When you complete a task, POST your result back:
+
+\`\`\`
+POST ${hubBase}/agents/${agent.id}/push-result
+X-API-Key: <your-agenthub-api-key>
+Content-Type: application/json
+
+{
+  "output": "<your completed result>",
+  "runId": "<optional: from task context>",
+  "success": true
+}
+\`\`\`
+
+## Polling for Tasks (optional)
+You can also poll for pending tasks:
+
+\`\`\`
+GET ${hubBase}/agents/${agent.id}/next-task
+X-API-Key: <your-agenthub-api-key>
+\`\`\`
+
+Returns \`{ "task": null }\` if no tasks pending, or \`{ "task": { "runId": "...", "input": "..." } }\`.
+
+## Behavior
+- Stay focused on your role and job description.
+- Always summarize what you did after completing a task.
+- If a task references other agents, mention the agent name so the hub can route.
+- Keep responses structured and concise.`;
+
+    res.json({ data: { agentId: agent.id, agentName: agent.name, prompt } });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to generate hub prompt', details: err.message });
+  }
+});
+
+// ─── GET /api/agents/:id/next-task ───────────────────────────────────────────
+// External agents poll this to pick up pending work
+
+router.get('/:id/next-task', async (req: Request, res: Response) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    // Find oldest pending run for this agent
+    const [pendingRun] = await db
+      .select()
+      .from(runs)
+      .where(and(eq(runs.agentId, req.params.id), eq(runs.status, 'pending')))
+      .orderBy(runs.createdAt)
+      .limit(1);
+
+    if (!pendingRun) {
+      res.json({ task: null });
+      return;
+    }
+
+    // Mark as running
+    await db.update(runs)
+      .set({ status: 'running', startedAt: new Date().toISOString() })
+      .where(eq(runs.id, pendingRun.id));
+
+    res.json({
+      task: {
+        runId: pendingRun.id,
+        input: pendingRun.input,
+        triggeredBy: pendingRun.triggeredBy,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch next task', details: err.message });
+  }
+});
+
+// ─── POST /api/agents/:id/push-result ────────────────────────────────────────
+// External agents (OpenClaw, remote Claude Code, etc.) push completed results
+
+router.post('/:id/push-result', async (req: Request, res: Response) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    const { output, runId, success = true, tokensUsed = 0, costUsd = 0, error: errMsg } = req.body;
+    const now = new Date().toISOString();
+
+    if (runId) {
+      // Update existing run
+      await db.update(runs)
+        .set({
+          status: success ? 'success' : 'failed',
+          completedAt: now,
+          output: typeof output === 'string' ? { text: output } : output,
+          tokensUsed: tokensUsed || 0,
+          costUsd: costUsd || 0,
+          error: errMsg || null,
+        })
+        .where(eq(runs.id, runId));
+    } else {
+      // Create a new completed run record
+      await db.insert(runs).values({
+        id: uuidv4(),
+        agentId: agent.id,
+        status: success ? 'success' : 'failed',
+        startedAt: now,
+        completedAt: now,
+        output: typeof output === 'string' ? { text: output } : (output || null),
+        tokensUsed: tokensUsed || 0,
+        costUsd: costUsd || 0,
+        triggeredBy: 'api',
+        error: errMsg || null,
+        createdAt: now,
+      });
+    }
+
+    if (costUsd > 0) {
+      await recordSpend(agent.id, costUsd);
+    }
+
+    res.json({ success: true, message: 'Result received' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to record result', details: err.message });
+  }
+});
+
+// ─── GET /api/agents/:id/connector-script ────────────────────────────────────
+// Returns a bash script to run on a remote machine for remote Claude Code / any CLI agent
+
+router.get('/:id/connector-script', async (req: Request, res: Response) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    const hubHost = process.env.HUB_HOST || 'localhost';
+    const hubPort = process.env.PORT || '3001';
+    const hubBase = `http://${hubHost}:${hubPort}/api`;
+    const config = (agent.config as Record<string, unknown>) || {};
+    const model = (config.model as string) || 'claude-sonnet-4-6';
+    const maxTurns = (config.maxTurns as number) || 5;
+
+    const script = `#!/usr/bin/env bash
+# AgentHub Connector Script — ${agent.name}
+# Agent ID: ${agent.id}
+# Generated: ${new Date().toISOString()}
+#
+# USAGE:
+#   chmod +x connector.sh
+#   HUB_API_KEY=your-key ./connector.sh
+#
+# REQUIREMENTS:
+#   - claude CLI installed (npm install -g @anthropic-ai/claude-code)
+#   - curl, jq
+
+set -euo pipefail
+
+AGENT_ID="${agent.id}"
+HUB_BASE="${hubBase}"
+API_KEY="\${HUB_API_KEY:-}"
+POLL_INTERVAL=\${POLL_INTERVAL:-10}  # seconds between polls
+MODEL="${model}"
+MAX_TURNS="${maxTurns}"
+
+if [ -z "\$API_KEY" ]; then
+  echo "ERROR: Set HUB_API_KEY environment variable"
+  exit 1
+fi
+
+echo "AgentHub Connector — ${agent.name} (\$AGENT_ID)"
+echo "Hub: \$HUB_BASE"
+echo "Polling every \${POLL_INTERVAL}s..."
+echo ""
+
+while true; do
+  # Poll for next task
+  RESPONSE=\$(curl -sf \\
+    -H "X-API-Key: \$API_KEY" \\
+    "\$HUB_BASE/agents/\$AGENT_ID/next-task" || echo '{"task":null}')
+
+  TASK=\$(echo "\$RESPONSE" | jq -r '.task // empty')
+
+  if [ -n "\$TASK" ] && [ "\$TASK" != "null" ]; then
+    RUN_ID=\$(echo "\$TASK" | jq -r '.runId // empty')
+    INPUT=\$(echo "\$TASK" | jq -r '.input // empty')
+
+    echo "[\$(date '+%H:%M:%S')] Task received (run: \$RUN_ID)"
+    echo "Input: \$INPUT"
+    echo ""
+
+    # Run claude CLI
+    if OUTPUT=\$(claude -p "\$INPUT" --output-format json --max-turns \$MAX_TURNS --model \$MODEL 2>&1); then
+      TEXT=\$(echo "\$OUTPUT" | jq -r '.result // .output // .' 2>/dev/null || echo "\$OUTPUT")
+      TOKENS=\$(echo "\$OUTPUT" | jq -r '(.usage.input_tokens // 0) + (.usage.output_tokens // 0)' 2>/dev/null || echo "0")
+      echo "Completed. Tokens: \$TOKENS"
+
+      curl -sf -X POST \\
+        -H "X-API-Key: \$API_KEY" \\
+        -H "Content-Type: application/json" \\
+        -d "{\\"output\\": \$(echo "\$TEXT" | jq -Rs .), \\"runId\\": \\"\$RUN_ID\\", \\"success\\": true, \\"tokensUsed\\": \$TOKENS}" \\
+        "\$HUB_BASE/agents/\$AGENT_ID/push-result" > /dev/null
+      echo "Result pushed to hub."
+    else
+      ERR="\$OUTPUT"
+      echo "ERROR: \$ERR"
+      curl -sf -X POST \\
+        -H "X-API-Key: \$API_KEY" \\
+        -H "Content-Type: application/json" \\
+        -d "{\\"output\\": null, \\"runId\\": \\"\$RUN_ID\\", \\"success\\": false, \\"error\\": \$(echo "\$ERR" | jq -Rs .)}" \\
+        "\$HUB_BASE/agents/\$AGENT_ID/push-result" > /dev/null
+    fi
+    echo ""
+  fi
+
+  sleep \$POLL_INTERVAL
+done`;
+
+    // Return as plain text for download
+    if (req.query.download === 'true') {
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="agenthub-connector-${agent.name.toLowerCase().replace(/\s+/g, '-')}.sh"`);
+      res.send(script);
+    } else {
+      res.json({ data: { agentId: agent.id, agentName: agent.name, script } });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to generate connector script', details: err.message });
+  }
+});
+
 // ─── GET /api/agents/:id/soul-md ─────────────────────────────────────────────
 
 router.get('/:id/soul-md', async (req: Request, res: Response) => {
