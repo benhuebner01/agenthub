@@ -761,61 +761,46 @@ function InternalConfig({
   onChange: (c: Record<string, unknown>) => void
 }) {
   const [provider, setProvider] = useState((config.provider as string) || 'auto')
-  const [model, setModel] = useState((config.model as string) || '')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
-
-  const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001']
-  const openaiModels = ['gpt-5.2', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4.1', 'gpt-4o', 'o3', 'o4-mini']
 
   useEffect(() => {
     const c: Record<string, unknown> = { systemPrompt }
     if (provider !== 'auto') c.provider = provider
-    if (model) c.model = model
     onChange(c)
-  }, [provider, model, systemPrompt])
+  }, [provider, systemPrompt])
+
+  const providerCards = [
+    { value: 'auto',      icon: '⚡', label: 'Auto-detect',      desc: 'Whichever API key is configured' },
+    { value: 'anthropic', icon: '🧠', label: 'Anthropic (Claude)', desc: 'claude-sonnet-4-6 by default' },
+    { value: 'openai',    icon: '🤖', label: 'OpenAI',            desc: 'gpt-5.2 by default' },
+  ]
 
   return (
     <div className="space-y-3">
       <InfoBox variant="purple">
-        Uses whichever API key is configured in your environment. No extra setup needed.
+        Uses your configured API keys. Model is chosen automatically — you can pin a specific model later via Settings.
       </InfoBox>
       <div>
         <label className={LABEL_CLASS}>Provider</label>
-        <select
-          value={provider}
-          onChange={(e) => {
-            setProvider(e.target.value)
-            setModel('')
-          }}
-          className={INPUT_CLASS}
-        >
-          <option value="auto">Auto-detect (use whichever key is set)</option>
-          <option value="anthropic">Anthropic (Claude)</option>
-          <option value="openai">OpenAI</option>
-        </select>
+        <div className="grid grid-cols-3 gap-2">
+          {providerCards.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => setProvider(p.value)}
+              className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border text-center transition-all ${
+                provider === p.value
+                  ? 'border-accent-purple bg-accent-purple/10 text-white'
+                  : 'border-dark-border bg-white/5 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <span className="text-lg">{p.icon}</span>
+              <span className="text-xs font-medium leading-tight">{p.label}</span>
+              <span className="text-[10px] text-slate-500 leading-tight">{p.desc}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      {(provider === 'anthropic' || provider === 'auto') && (
-        <div>
-          <label className={LABEL_CLASS}>Model (optional)</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-            <option value="">Default (claude-sonnet-4-6)</option>
-            {claudeModels.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-      )}
-      {provider === 'openai' && (
-        <div>
-          <label className={LABEL_CLASS}>Model (optional)</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-            <option value="">Default (gpt-5.2)</option>
-            {openaiModels.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-      )}
       <div>
         <label className={LABEL_CLASS}>System Prompt</label>
         <textarea
@@ -1246,6 +1231,88 @@ function OpenClawConfig({
           </span>
         )}
       </div>
+
+      {/* Hub Integration Prompt */}
+      <OpenClawHubPrompt host={host} port={port} />
+    </div>
+  )
+}
+
+// ─── OpenClaw Hub Integration Prompt ─────────────────────────────────────────
+
+function OpenClawHubPrompt({ host, port }: { host: string; port: string }) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const hubUrl = typeof window !== 'undefined'
+    ? window.location.origin
+    : 'http://localhost:3000'
+
+  const prompt = `You are an AI agent registered with AgentHub — an AI orchestration platform that coordinates multiple AI agents as a virtual organization.
+
+## Your Role
+You receive tasks from the AgentHub orchestration system and return results. You are part of an automated agent team. Work efficiently and return structured responses.
+
+## Task Format
+Tasks arrive as plain text describing what you need to do. Additional context may be prefixed with [CONTEXT:].
+
+## Response Format
+Return your response as plain text. The hub captures your full output. If you encounter issues, prefix your response with [ERROR:].
+
+## AgentHub API (for advanced workflows)
+You can call back to the hub to trigger other agents or log results:
+- Base URL: ${hubUrl}/api
+- Run an agent: POST /api/agents/{agentId}/run
+  Body: {"input": "task description"}
+  Headers: {"X-API-Secret": "<your-hub-secret>"}
+- List agents: GET /api/agents
+- Get run result: GET /api/runs/{runId}
+
+## Guidelines
+- Complete tasks thoroughly and return clear results
+- For multi-step tasks, describe each step you took
+- If a task requires capabilities you don't have, say so clearly
+- You can propose follow-up tasks by writing [PROPOSE: description of next task]
+- You are connected to OpenClaw at ${host}:${port} as your execution environment`
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(prompt).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="border border-dashed border-dark-border rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+      >
+        <span className="flex items-center gap-1.5">
+          <Plug className="w-3.5 h-3.5 text-yellow-400" />
+          Hub Integration Prompt — paste this into OpenClaw's system prompt
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-2">
+          <textarea
+            readOnly
+            value={prompt}
+            rows={10}
+            className="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-xs text-slate-400 font-mono resize-y focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/40 text-accent-purple rounded-lg transition-colors"
+          >
+            {copied ? <CheckCircle className="w-3.5 h-3.5" /> : <ExternalLink className="w-3.5 h-3.5" />}
+            {copied ? 'Copied!' : 'Copy Prompt'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

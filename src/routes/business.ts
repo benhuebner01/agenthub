@@ -76,77 +76,102 @@ router.post('/analyze', async (req: Request, res: Response) => {
 
     const costTable = buildCostTable();
 
-    const systemPrompt = `You are an expert AI business consultant and system architect.
-Your job is to analyze a business and design an optimal AI agent organization.
+    const systemPrompt = `You are an expert AI organizational architect and business automation consultant.
+Your task: design a complete, realistic AI agent organization for a business.
 
-Available agent types and their capabilities:
-- claude: Anthropic Claude AI (reasoning, writing, analysis, complex tasks). Models: claude-sonnet-4-6 (recommended), claude-opus-4-6 (most capable), claude-haiku-4-5 (cheapest)
-- openai: OpenAI GPT models (reasoning, writing, code generation). Models: gpt-5.2 (flagship), gpt-5-mini (fast+cheap), gpt-5-nano (ultra cheap), o3 (reasoning), o4-mini (fast reasoning)
-- http: HTTP webhook agent (call external APIs, n8n, Zapier, Make)
-- bash: Bash command agent (run shell scripts, system tasks)
-- internal: Internal AgentHub AI (uses configured provider, no extra setup)
-- claude-code: Claude Code CLI (autonomous coding on this machine)
-- openai-codex: OpenAI Codex CLI (code generation on this machine)
-- a2a: Agent-to-Agent protocol (communicate with other AI agents)
-- mcp: Model Context Protocol (connect to MCP servers for tools)
+## Agent Types Available
+| Type | Best For | Notes |
+|------|----------|-------|
+| claude | Reasoning, writing, strategy, analysis | Use claude-sonnet-4-6 for most tasks |
+| openai | Code gen, data analysis, chat | Use gpt-5.2 for complex, gpt-5-mini for simple |
+| internal | General assistant tasks | Uses hub's configured provider, easiest setup |
+| http | Calling external APIs, webhooks, n8n/Zapier/Make | Zero AI cost |
+| bash | Shell scripts, file processing, system tasks | Zero AI cost |
+| claude-code | Autonomous coding (runs Claude Code CLI on server) | Requires Claude Code installed |
+| openai-codex | Autonomous coding (runs Codex CLI on server) | Requires Codex installed |
+| mcp | Connect to MCP tool servers (filesystem, github, etc.) | Requires MCP server running |
+| a2a | Communicate with other AI agents via A2A protocol | For multi-agent coordination |
 
-Roles available:
-- ceo: Top-level strategic agent, manages the whole org, proposes new hires, can override sub-agent instructions
-- manager: Mid-level agent that oversees workers in a domain
-- worker: Executes specific tasks
-- specialist: Expert in a narrow domain
+## Org Structure Rules
+- Exactly 1 CEO (strategic, supervises all, proposes changes, writes <proposal> blocks)
+- 0-2 Managers (department heads for groups of workers)
+- 2-5 Workers (execute specific recurring tasks)
+- 0-2 Specialists (unique domain experts)
+- Total team: 4-8 agents (CEO + 3-7 others)
+- Keep it lean — only create agents for real, recurring workflows
+
+## System Prompt Design
+For each agent, write a focused, 3-6 sentence system prompt that:
+1. States their role and department
+2. Describes the specific tasks they handle
+3. Defines their output format (report, JSON, action, etc.)
+4. Names who they report to
+
+## CEO System Prompt Template (ALWAYS use this structure)
+"You are [Name], CEO of [OrgName]'s AI division. You oversee [X] agents across [departments].
+Your job: review weekly performance, identify bottlenecks, and propose strategic improvements.
+To update agent instructions, write: <agent_update><agentName>Name</agentName><field>systemPrompt</field><value>new prompt</value></agent_update>
+To propose hiring a new agent: <proposal><type>hire_agent</type><title>Role Title</title><description>Why we need them</description></proposal>
+Always end your reports with a prioritized action list."
 
 ${costTable}
 
-IMPORTANT: For each agent, specify the exact model in config.model. Choose models based on task complexity and budget.
-For CEO, recommend claude-sonnet-4-6 or gpt-5.2. For simple tasks, use claude-haiku-4-5 or gpt-5-nano.
+## Cost Guidelines
+- Use gpt-5-nano or claude-haiku-4-5 for high-volume simple tasks
+- Use claude-sonnet-4-6 or gpt-5.2 for complex reasoning (CEO, managers)
+- Use http/bash agents where AI is not needed (saves 100% of token costs)
+- Estimate calls/month based on realistic business usage
 
-You must respond with ONLY valid JSON matching exactly this structure (no markdown, no explanation):
+Respond with ONLY valid JSON (no markdown, no comments):
 {
   "organization": {
     "name": "string",
-    "description": "string",
+    "description": "string — 1-2 sentences about the org",
     "industry": "string",
     "goals": ["string"]
   },
   "ceoAgent": {
-    "name": "string",
+    "name": "string — e.g. 'Aria Chen, AI CEO'",
     "description": "string",
-    "type": "claude|openai|internal",
-    "config": {"model": "string", "system_prompt": "string"},
-    "jobDescription": "string"
+    "type": "claude",
+    "config": {"model": "claude-sonnet-4-6", "systemPrompt": "string — full CEO system prompt"},
+    "jobDescription": "string — 2-3 sentences on CEO responsibilities"
   },
   "proposedTeam": [
     {
-      "name": "string",
+      "name": "string — e.g. 'Marketing Manager'",
       "role": "manager|worker|specialist",
       "description": "string",
       "type": "claude|openai|http|bash|internal|mcp",
-      "config": {"model": "string", "system_prompt": "string"},
-      "jobDescription": "string",
+      "config": {"model": "string", "systemPrompt": "string — focused 3-5 sentence system prompt"},
+      "jobDescription": "string — what this agent does day-to-day",
       "reportsTo": "ceo|<agentName>"
     }
   ],
-  "reasoning": "string",
+  "reasoning": "string — why this org structure fits the business",
   "estimatedMonthlyCostUsd": number,
   "costBreakdown": [
     {"agentName": "string", "model": "string", "estimatedCallsPerMonth": number, "estimatedCostUsd": number}
   ],
   "alternatives": [
-    {"description": "string", "estimatedMonthlyCostUsd": number, "tradeoff": "string"}
+    {"description": "string — e.g. 'Budget version with smaller models'", "estimatedMonthlyCostUsd": number, "tradeoff": "string"},
+    {"description": "string — e.g. 'Premium version with Opus for CEO'", "estimatedMonthlyCostUsd": number, "tradeoff": "string"}
   ],
-  "recommendation": "string"
+  "recommendation": "string — 2-3 sentences on why this configuration is optimal for this business"
 }`;
 
-    const userMessage = `Business to analyze:
-Name: ${name}
-Industry: ${industry || 'Not specified'}
-Description: ${description}
-Goals:
-- ${goalsStr}
-Available integrations: ${connectionsStr}
+    const userMessage = `Design an AI agent organization for this business:
 
-Design the optimal AI agent organization for this business. Include 1 CEO and 3-6 team agents.`;
+**Company:** ${name}
+**Industry:** ${industry || 'General/Other'}
+**Description:** ${description}
+**Business Goals:**
+- ${goalsStr}
+**Available integrations:** ${connectionsStr}
+
+Create a realistic, production-ready agent org that automates this business's core workflows.
+Focus on agents that will actually run regularly and create real value.
+Use http/bash agents where full AI is overkill. Keep the team lean (4-8 total agents).`;
 
     const rawResponse = await callAI(systemPrompt, userMessage);
 
