@@ -1445,6 +1445,34 @@ function OpenClawConfig({
   const [docsLoading, setDocsLoading] = useState(false)
   const [activeDoc, setActiveDoc] = useState<'bootstrap' | 'soul' | 'heartbeat' | 'prompt'>('bootstrap')
   const [copied, setCopied] = useState(false)
+  const [docsError, setDocsError] = useState<string | null>(null)
+
+  // ── Auto-load onboarding docs when agentId is available ──────────────────
+  const fetchDocs = async () => {
+    if (!agentId) return
+    setDocsLoading(true)
+    setDocsError(null)
+    try {
+      const [soulResult, promptResult] = await Promise.all([
+        getAgentSoulMd(agentId),
+        getAgentHubPrompt(agentId),
+      ])
+      setSoulMd(soulResult.data.soulMd)
+      setHeartbeatMd(soulResult.data.heartbeatMd)
+      setBootstrapMd(soulResult.data.bootstrapMd)
+      setHubPrompt(promptResult.data.prompt)
+      setActiveDoc('bootstrap')
+    } catch (e: any) {
+      setDocsError(e?.message || 'Fehler beim Laden der Onboarding-Dateien')
+    } finally {
+      setDocsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (agentId) { fetchDocs() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId])
 
   useEffect(() => {
     const c: Record<string, unknown> = {
@@ -1488,22 +1516,7 @@ function OpenClawConfig({
     }
   }
 
-  const handleGenerateDocs = async () => {
-    if (!agentId) return
-    setDocsLoading(true)
-    try {
-      const [soulResult, promptResult] = await Promise.all([
-        getAgentSoulMd(agentId),
-        getAgentHubPrompt(agentId),
-      ])
-      setSoulMd(soulResult.data.soulMd)
-      setHeartbeatMd(soulResult.data.heartbeatMd)
-      setBootstrapMd(soulResult.data.bootstrapMd)
-      setHubPrompt(promptResult.data.prompt)
-      setActiveDoc('bootstrap')
-    } catch { /* ignore */ }
-    finally { setDocsLoading(false) }
-  }
+  const handleGenerateDocs = fetchDocs
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -1670,47 +1683,68 @@ function OpenClawConfig({
       )}
 
       {/* ── Onboarding Files (BOOTSTRAP / SOUL / HEARTBEAT / Hub Prompt) ─── */}
-      <div className="border border-accent-purple/30 rounded-xl p-4 space-y-3 bg-accent-purple/5">
-        <div className="flex items-center justify-between">
+      <div className="border border-accent-purple/40 rounded-xl p-4 space-y-3 bg-accent-purple/5">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2">
           <div>
-            <p className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-              <Plug className="w-3.5 h-3.5 text-accent-purple" />
+            <p className="text-sm font-semibold text-slate-100 flex items-center gap-1.5">
+              <Plug className="w-4 h-4 text-accent-purple" />
               Onboarding Files
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              BOOTSTRAP.md (invite prompt) + SOUL.md + HEARTBEAT.md — drop in your OpenClaw agent workspace.
+            <p className="text-xs text-slate-400 mt-0.5">
+              Lade diese Dateien in deinen OpenClaw-Agenten-Workspace. Verbindungsmodus: <strong className="text-slate-200">{connectionType}</strong>
             </p>
           </div>
-          {agentId ? (
-            <button type="button" onClick={handleGenerateDocs} disabled={docsLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple hover:bg-purple-600 text-white rounded-lg transition-colors disabled:opacity-50 shrink-0">
-              {docsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-              Generate All
-            </button>
-          ) : (
-            <span className="text-xs text-slate-600 italic">Save agent first</span>
-          )}
+          <button type="button" onClick={handleGenerateDocs} disabled={docsLoading || !agentId}
+            title={!agentId ? 'Agent zuerst speichern' : 'Dateien neu generieren'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-accent-purple hover:bg-purple-600 disabled:bg-dark-border disabled:text-slate-500 text-white rounded-lg transition-colors shrink-0">
+            {docsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+            {docsLoading ? 'Lädt…' : bootstrapMd ? 'Aktualisieren' : 'Generieren'}
+          </button>
         </div>
 
-        {(bootstrapMd || soulMd || hubPrompt) && (
+        {/* Not-saved hint */}
+        {!agentId && (
+          <InfoBox variant="yellow">
+            Agent zuerst speichern — danach werden BOOTSTRAP.md, SOUL.md und HEARTBEAT.md automatisch generiert.
+          </InfoBox>
+        )}
+
+        {/* Loading spinner */}
+        {docsLoading && (
+          <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+            <Loader2 className="w-4 h-4 animate-spin text-accent-purple" />
+            Generiere Onboarding-Dateien…
+          </div>
+        )}
+
+        {/* Error */}
+        {docsError && !docsLoading && (
+          <div className="text-xs text-red-400 flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />{docsError}
+          </div>
+        )}
+
+        {/* Tabs + Content */}
+        {(bootstrapMd || soulMd || hubPrompt) && !docsLoading && (
           <div className="space-y-2">
-            {/* Tabs */}
-            <div className="flex gap-1.5 flex-wrap">
+            {/* Tab Bar */}
+            <div className="flex gap-1.5 flex-wrap border-b border-dark-border pb-2">
               {[
-                { key: 'bootstrap', label: '📦 BOOTSTRAP.md', hint: 'First-boot invite prompt — agent reads once, then delete' },
-                { key: 'soul',      label: '🌟 SOUL.md',       hint: 'Identity file — loaded every session' },
-                { key: 'heartbeat', label: '💓 HEARTBEAT.md',  hint: 'How AgentHub talks to this agent' },
-                { key: 'prompt',    label: '🔌 Hub Prompt',    hint: 'Paste into OpenClaw system config or SOUL.md' },
+                { key: 'bootstrap', label: '📦 BOOTSTRAP.md', hint: 'Einmalige Onboarding-Datei — Agent liest sie beim ersten Start, dann löschen' },
+                { key: 'soul',      label: '🌟 SOUL.md',       hint: 'Identitätsdatei — wird bei jeder Session geladen' },
+                { key: 'heartbeat', label: '💓 HEARTBEAT.md',  hint: 'Protokoll: Wie AgentHub diesen Agenten anruft' },
+                { key: 'prompt',    label: '🔌 Hub Prompt',    hint: 'In OpenClaw Systemconfig einfügen oder vorne in SOUL.md' },
               ].map((tab) => {
                 const hasContent = tab.key === 'soul' ? !!soulMd : tab.key === 'heartbeat' ? !!heartbeatMd : tab.key === 'bootstrap' ? !!bootstrapMd : !!hubPrompt
                 if (!hasContent) return null
                 return (
                   <button key={tab.key} type="button" title={tab.hint}
                     onClick={() => setActiveDoc(tab.key as any)}
-                    className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                    className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition-colors ${
                       activeDoc === tab.key
-                        ? 'border-accent-purple/50 bg-accent-purple/20 text-accent-purple font-semibold'
-                        : 'border-dark-border text-slate-400 hover:text-slate-200'
+                        ? 'border-accent-purple/60 bg-accent-purple/25 text-purple-300'
+                        : 'border-dark-border text-slate-400 hover:border-slate-500 hover:text-slate-200'
                     }`}>
                     {tab.label}
                   </button>
@@ -1719,27 +1753,32 @@ function OpenClawConfig({
             </div>
 
             {/* Viewer */}
-            <div className="relative">
-              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-52 font-mono whitespace-pre-wrap">
+            <div className="relative group">
+              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 pr-20 overflow-auto max-h-64 font-mono whitespace-pre-wrap leading-relaxed">
                 {activeContent}
               </pre>
-              <div className="absolute top-2 right-2 flex gap-1">
+              {/* Action buttons — always visible, not just on hover */}
+              <div className="absolute top-2 right-2 flex flex-col gap-1">
                 <button type="button" onClick={() => activeContent && handleCopy(activeContent)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors">
-                  <Copy className="w-3 h-3" />{copied ? 'Copied!' : 'Copy'}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-accent-purple hover:bg-purple-600 text-white rounded-lg transition-colors shadow">
+                  <Copy className="w-3.5 h-3.5" />{copied ? '✓ Kopiert' : 'Kopieren'}
                 </button>
                 <button type="button" onClick={() => activeContent && handleDownload(activeContent, activeFilename)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors">
-                  <Download className="w-3 h-3" />Download
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-dark-sidebar border border-dark-border rounded-lg text-slate-300 hover:text-slate-100 hover:border-slate-500 transition-colors">
+                  <Download className="w-3.5 h-3.5" />Download
                 </button>
               </div>
             </div>
 
-            <p className="text-[10px] text-slate-600">
-              {activeDoc === 'bootstrap' ? 'Drop in ~/.openclaw/agents/<name>/BOOTSTRAP.md — agent reads on first boot, then rm BOOTSTRAP.md'
-               : activeDoc === 'soul'      ? 'Drop in ~/.openclaw/agents/<name>/SOUL.md — loaded at start of every session'
-               : activeDoc === 'heartbeat' ? 'Drop in ~/.openclaw/agents/<name>/HEARTBEAT.md — protocol for incoming AgentHub calls'
-               : 'Paste into OpenClaw system config or prepend to SOUL.md'}
+            {/* Context hint */}
+            <p className="text-[11px] text-slate-500">
+              {activeDoc === 'bootstrap'
+                ? '→ In OpenClaw-Workspace ablegen: ~/.openclaw/agents/<name>/BOOTSTRAP.md — wird beim ersten Start gelesen, danach löschen (rm BOOTSTRAP.md)'
+                : activeDoc === 'soul'
+                ? '→ In OpenClaw-Workspace ablegen: ~/.openclaw/agents/<name>/SOUL.md — wird bei jeder Session automatisch geladen'
+                : activeDoc === 'heartbeat'
+                ? '→ In OpenClaw-Workspace ablegen: ~/.openclaw/agents/<name>/HEARTBEAT.md — zeigt dem Agenten wie AgentHub ihn anruft'
+                : '→ In OpenClaw Systemkonfiguration einfügen oder vorne in SOUL.md hinzufügen'}
             </p>
           </div>
         )}
