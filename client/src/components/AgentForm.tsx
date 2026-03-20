@@ -667,7 +667,7 @@ function OpenAIConfig({
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
 }) {
-  const [model, setModel] = useState((config.model as string) || 'gpt-4o')
+  const [model, setModel] = useState((config.model as string) || 'gpt-5.2')
   const [systemPrompt, setSystemPrompt] = useState(
     (config.systemPrompt as string) || (config.system_prompt as string) || ''
   )
@@ -686,13 +686,14 @@ function OpenAIConfig({
       <div>
         <label className={LABEL_CLASS}>Model</label>
         <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-          <optgroup label="GPT-5.4">
-            <option value="gpt-5.4-pro">gpt-5.4-pro — state-of-the-art</option>
-            <option value="gpt-5.4-nano">gpt-5.4-nano — very fast &amp; cheap</option>
-            <option value="gpt-5.4-mini">gpt-5.4-mini — fast &amp; cheap</option>
+          <optgroup label="GPT-5">
+            <option value="gpt-5.2">gpt-5.2 — flagship, most capable</option>
+            <option value="gpt-5-mini">gpt-5-mini — fast &amp; capable</option>
+            <option value="gpt-5-nano">gpt-5-nano — ultra fast &amp; cheapest</option>
           </optgroup>
-          <optgroup label="GPT-4o">
-            <option value="gpt-4o">gpt-4o — great balance</option>
+          <optgroup label="Previous Gen">
+            <option value="gpt-4.1">gpt-4.1 — previous flagship</option>
+            <option value="gpt-4o">gpt-4o — still available</option>
             <option value="gpt-4o-mini">gpt-4o-mini — budget friendly</option>
           </optgroup>
           <optgroup label="Reasoning">
@@ -764,7 +765,7 @@ function InternalConfig({
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
 
   const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001']
-  const openaiModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-5.4-pro', 'gpt-5.4-nano', 'o3']
+  const openaiModels = ['gpt-5.2', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4.1', 'gpt-4o', 'o3', 'o4-mini']
 
   useEffect(() => {
     const c: Record<string, unknown> = { systemPrompt }
@@ -808,7 +809,7 @@ function InternalConfig({
         <div>
           <label className={LABEL_CLASS}>Model (optional)</label>
           <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-            <option value="">Default (gpt-4o)</option>
+            <option value="">Default (gpt-5.2)</option>
             {openaiModels.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}

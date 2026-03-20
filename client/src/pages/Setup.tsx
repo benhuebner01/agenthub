@@ -417,7 +417,7 @@ function StepProviders({
           </div>
           <div className="flex-1">
             <p className="text-sm font-semibold text-slate-200">OpenAI</p>
-            <p className="text-xs text-slate-500">gpt-5.4-pro, gpt-4o, o3, o4-mini and more</p>
+            <p className="text-xs text-slate-500">gpt-5.2, gpt-5-mini, o3, o4-mini and more</p>
           </div>
           <StatusIcon status={openaiStatus} />
           {openaiStatus === 'ok' && (
