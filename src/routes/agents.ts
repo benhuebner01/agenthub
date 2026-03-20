@@ -13,7 +13,7 @@ const router = Router();
 const createAgentSchema = z.object({
   name: z.string().min(1).max(255),
   description: z.string().optional(),
-  type: z.enum(['http', 'claude', 'openai', 'bash', 'claude-code', 'openai-codex', 'cursor', 'openclaw', 'a2a', 'internal']),
+  type: z.enum(['http', 'claude', 'openai', 'bash', 'claude-code', 'openai-codex', 'cursor', 'openclaw', 'a2a', 'internal', 'mcp']),
   config: z.record(z.unknown()).default({}),
   status: z.enum(['active', 'paused', 'error']).default('active'),
   role: z.enum(['ceo', 'manager', 'worker', 'specialist']).optional(),

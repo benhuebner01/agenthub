@@ -437,7 +437,7 @@ export default function BusinessSetup() {
                     onChange={(e) => setEditableCeo({ ...editableCeo, type: e.target.value as AgentType })}
                     className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200"
                   >
-                    {['claude', 'openai', 'internal'].map((t) => (
+                    {['claude', 'openai', 'internal', 'openclaw', 'claude-code'].map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
@@ -479,7 +479,7 @@ export default function BusinessSetup() {
                       onChange={(e) => setEditableTeam((t) => t.map((a, idx) => idx === i ? { ...a, type: e.target.value as AgentType } : a))}
                       className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200"
                     >
-                      {['claude', 'openai', 'http', 'bash', 'internal'].map((t) => (
+                      {['claude', 'openai', 'http', 'bash', 'internal', 'openclaw', 'claude-code', 'a2a', 'mcp'].map((t) => (
                         <option key={t} value={t}>{t}</option>
                       ))}
                     </select>
