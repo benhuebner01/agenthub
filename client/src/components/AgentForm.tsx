@@ -667,7 +667,7 @@ function OpenAIConfig({
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
 }) {
-  const [model, setModel] = useState((config.model as string) || 'gpt-5.2')
+  const [model, setModel] = useState((config.model as string) || 'gpt-4o')
   const [systemPrompt, setSystemPrompt] = useState(
     (config.systemPrompt as string) || (config.system_prompt as string) || ''
   )
@@ -686,14 +686,13 @@ function OpenAIConfig({
       <div>
         <label className={LABEL_CLASS}>Model</label>
         <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-          <optgroup label="GPT-5">
-            <option value="gpt-5.2">gpt-5.2 — flagship, most capable</option>
-            <option value="gpt-5-mini">gpt-5-mini — fast &amp; capable</option>
-            <option value="gpt-5-nano">gpt-5-nano — ultra fast &amp; cheapest</option>
+          <optgroup label="GPT-5.4">
+            <option value="gpt-5.4-pro">gpt-5.4-pro — state-of-the-art</option>
+            <option value="gpt-5.4-nano">gpt-5.4-nano — very fast &amp; cheap</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini — fast &amp; cheap</option>
           </optgroup>
-          <optgroup label="Previous Gen">
-            <option value="gpt-4.1">gpt-4.1 — previous flagship</option>
-            <option value="gpt-4o">gpt-4o — still available</option>
+          <optgroup label="GPT-4o">
+            <option value="gpt-4o">gpt-4o — great balance</option>
             <option value="gpt-4o-mini">gpt-4o-mini — budget friendly</option>
           </optgroup>
           <optgroup label="Reasoning">
@@ -761,46 +760,61 @@ function InternalConfig({
   onChange: (c: Record<string, unknown>) => void
 }) {
   const [provider, setProvider] = useState((config.provider as string) || 'auto')
+  const [model, setModel] = useState((config.model as string) || '')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
+
+  const claudeModels = ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001']
+  const openaiModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-5.4-pro', 'gpt-5.4-nano', 'o3']
 
   useEffect(() => {
     const c: Record<string, unknown> = { systemPrompt }
     if (provider !== 'auto') c.provider = provider
+    if (model) c.model = model
     onChange(c)
-  }, [provider, systemPrompt])
-
-  const providerCards = [
-    { value: 'auto',      icon: '⚡', label: 'Auto-detect',      desc: 'Whichever API key is configured' },
-    { value: 'anthropic', icon: '🧠', label: 'Anthropic (Claude)', desc: 'claude-sonnet-4-6 by default' },
-    { value: 'openai',    icon: '🤖', label: 'OpenAI',            desc: 'gpt-5.2 by default' },
-  ]
+  }, [provider, model, systemPrompt])
 
   return (
     <div className="space-y-3">
       <InfoBox variant="purple">
-        Uses your configured API keys. Model is chosen automatically — you can pin a specific model later via Settings.
+        Uses whichever API key is configured in your environment. No extra setup needed.
       </InfoBox>
       <div>
         <label className={LABEL_CLASS}>Provider</label>
-        <div className="grid grid-cols-3 gap-2">
-          {providerCards.map((p) => (
-            <button
-              key={p.value}
-              type="button"
-              onClick={() => setProvider(p.value)}
-              className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border text-center transition-all ${
-                provider === p.value
-                  ? 'border-accent-purple bg-accent-purple/10 text-white'
-                  : 'border-dark-border bg-white/5 text-slate-400 hover:border-slate-500 hover:text-slate-300'
-              }`}
-            >
-              <span className="text-lg">{p.icon}</span>
-              <span className="text-xs font-medium leading-tight">{p.label}</span>
-              <span className="text-[10px] text-slate-500 leading-tight">{p.desc}</span>
-            </button>
-          ))}
-        </div>
+        <select
+          value={provider}
+          onChange={(e) => {
+            setProvider(e.target.value)
+            setModel('')
+          }}
+          className={INPUT_CLASS}
+        >
+          <option value="auto">Auto-detect (use whichever key is set)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI</option>
+        </select>
       </div>
+      {(provider === 'anthropic' || provider === 'auto') && (
+        <div>
+          <label className={LABEL_CLASS}>Model (optional)</label>
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
+            <option value="">Default (claude-sonnet-4-6)</option>
+            {claudeModels.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {provider === 'openai' && (
+        <div>
+          <label className={LABEL_CLASS}>Model (optional)</label>
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
+            <option value="">Default (gpt-4o)</option>
+            {openaiModels.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div>
         <label className={LABEL_CLASS}>System Prompt</label>
         <textarea
@@ -1108,7 +1122,6 @@ function OpenClawConfig({
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
 }) {
-  const [mode, setMode] = useState<'api' | 'webhook'>((config.mode as 'api' | 'webhook') || 'api')
   const [host, setHost] = useState((config.host as string) || 'localhost')
   const [port, setPort] = useState(String((config.port as number) || 18789))
   const [model, setModel] = useState((config.model as string) || 'openclaw:main')
@@ -1118,11 +1131,11 @@ function OpenClawConfig({
   const [testMsg, setTestMsg] = useState('')
 
   useEffect(() => {
-    const c: Record<string, unknown> = { mode, host, port: parseInt(port) || 18789, model }
+    const c: Record<string, unknown> = { host, port: parseInt(port) || 18789, model }
     if (token) c.token = token
     if (systemPrompt) c.systemPrompt = systemPrompt
     onChange(c)
-  }, [mode, host, port, model, token, systemPrompt])
+  }, [host, port, model, token, systemPrompt])
 
   const handleTest = async () => {
     setTestStatus('testing')
@@ -1144,65 +1157,27 @@ function OpenClawConfig({
     }
   }
 
-  const hubUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-
   return (
     <div className="space-y-3">
-      {/* Mode selector */}
-      <div>
-        <label className={LABEL_CLASS}>Connection Mode</label>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setMode('api')}
-            className={`flex flex-col gap-0.5 p-2.5 rounded-lg border text-left transition-all ${
-              mode === 'api'
-                ? 'border-accent-purple bg-accent-purple/10 text-white'
-                : 'border-dark-border bg-white/5 text-slate-400 hover:border-slate-500'
-            }`}
-          >
-            <span className="text-xs font-semibold">API Mode</span>
-            <span className="text-[10px] text-slate-500">Hub calls OpenClaw's API directly</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('webhook')}
-            className={`flex flex-col gap-0.5 p-2.5 rounded-lg border text-left transition-all ${
-              mode === 'webhook'
-                ? 'border-accent-purple bg-accent-purple/10 text-white'
-                : 'border-dark-border bg-white/5 text-slate-400 hover:border-slate-500'
-            }`}
-          >
-            <span className="text-xs font-semibold">Webhook Mode</span>
-            <span className="text-[10px] text-slate-500">Hub pings OpenClaw, it calls back</span>
-          </button>
-        </div>
-      </div>
-
-      {mode === 'webhook' && (
-        <div className="p-2.5 rounded-lg bg-yellow-500/5 border border-yellow-500/20 space-y-1.5">
-          <p className="text-xs font-medium text-yellow-300">Fire-and-forget webhook setup</p>
-          <p className="text-[10px] text-slate-400">
-            Hub sends a ping to OpenClaw with task context. OpenClaw processes it and POSTs results back.
-            Configure OpenClaw to call back to:
-          </p>
-          <code className="block text-[10px] font-mono text-slate-300 bg-dark-bg rounded px-2 py-1 break-all">
-            {hubUrl}/api/agents/callback
-          </code>
-          <p className="text-[10px] text-slate-500">
-            Add the HEARTBEAT.md file (generated below) to your OpenClaw workspace directory.
-          </p>
-        </div>
-      )}
-
+      <InfoBox>
+        OpenClaw listens on port 18789 with an OpenAI-compatible API.{' '}
+        <a
+          href="https://docs.openclaw.ai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:opacity-80"
+        >
+          docs.openclaw.ai
+        </a>
+      </InfoBox>
       <div className="grid grid-cols-3 gap-2">
         <div className="col-span-2">
-          <label className={LABEL_CLASS}>{mode === 'webhook' ? 'Webhook URL' : 'Host'}</label>
+          <label className={LABEL_CLASS}>Host</label>
           <input
             type="text"
             value={host}
             onChange={(e) => setHost(e.target.value)}
-            placeholder={mode === 'webhook' ? 'https://openclaw.example.com' : 'localhost'}
+            placeholder="localhost"
             className={INPUT_CLASS + ' font-mono text-xs'}
           />
         </div>
@@ -1247,184 +1222,29 @@ function OpenClawConfig({
           placeholder="You are a helpful assistant..."
         />
       </div>
-      {mode === 'api' && (
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleTest}
-            disabled={testStatus === 'testing'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {testStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Test Connection
-          </button>
-          {testStatus === 'ok' && (
-            <span className="flex items-center gap-1 text-xs text-green-400">
-              <CheckCircle className="w-3.5 h-3.5" />
-              {testMsg}
-            </span>
-          )}
-          {testStatus === 'error' && (
-            <span className="flex items-center gap-1 text-xs text-red-400">
-              <AlertCircle className="w-3.5 h-3.5" />
-              {testMsg}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Hub Integration Files */}
-      <OpenClawHubPrompt host={host} port={port} mode={mode} />
-    </div>
-  )
-}
-
-// ─── OpenClaw Hub Integration Files ──────────────────────────────────────────
-
-function OpenClawHubPrompt({ host, port, mode }: { host: string; port: string; mode: 'api' | 'webhook' }) {
-  const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'soul' | 'heartbeat'>('soul')
-  const [copied, setCopied] = useState(false)
-
-  const hubUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-
-  const soulMd = `# SOUL.md — AgentHub Integration
-
-You are an AI agent registered with **AgentHub**, an AI orchestration platform.
-You operate as part of an automated agent organization with a CEO, managers, and specialist workers.
-
-## Your Purpose
-You receive tasks dispatched by the AgentHub orchestration system and return results.
-Work efficiently, be thorough, and communicate clearly.
-
-## Task Format
-Tasks arrive as plain text. Additional context may be included as:
-- \`[CONTEXT: ...]\` — background from previous runs or memory
-- \`[PRIORITY: high|normal|low]\` — urgency level
-- \`[REPORTER: AgentName]\` — which agent triggered this task
-
-## Response Format
-Return plain text. The hub captures your full output.
-- Start with a one-line summary of what you did
-- Detail your work below
-- End with \`[STATUS: done|partial|blocked]\`
-- If blocked: \`[BLOCKED: reason]\`
-- To propose follow-up work: \`[PROPOSE: description]\`
-
-## AgentHub API
-You can call back to the hub to trigger other agents:
-\`\`\`
-POST ${hubUrl}/api/agents/{agentId}/run
-Headers: X-API-Secret: <hub-secret>
-Body: {"input": "task description"}
-\`\`\`
-List available agents: \`GET ${hubUrl}/api/agents\`
-
-## Connected at
-OpenClaw endpoint: ${host}:${port}
-Hub origin: ${hubUrl}
-`
-
-  const heartbeatMd = `# HEARTBEAT.md — AgentHub Heartbeat Instructions
-
-When AgentHub triggers a heartbeat, follow these instructions:
-
-## On Heartbeat Received
-1. Read the task from the request body field \`input\`
-2. Check \`[CONTEXT:]\` prefix for any background context
-3. Process the task completely
-4. POST your result back to the hub callback URL
-
-## Callback (Webhook Mode)
-\`\`\`
-POST ${hubUrl}/api/agents/callback
-Content-Type: application/json
-X-API-Secret: <your-hub-secret>
-
-{
-  "runId": "<runId from heartbeat>",
-  "agentId": "<your-agentId>",
-  "output": "your response text here",
-  "status": "done"
-}
-\`\`\`
-
-## Status Values
-- \`done\` — task completed successfully
-- \`partial\` — partially completed, explain what's missing
-- \`blocked\` — cannot proceed, include reason in output
-- \`error\` — unexpected error occurred
-
-## Context Files
-- Read SOUL.md for your identity and role
-- Read SKILLS.md (if present) for project-specific context and tools
-
-## Important
-- Always respond to every heartbeat, even if just to say you're blocked
-- Include \`[PROPOSE: ...]\` in your output to suggest follow-up tasks
-- The hub logs all responses for audit and analysis
-`
-
-  const content = activeTab === 'soul' ? soulMd : heartbeatMd
-  const filename = activeTab === 'soul' ? 'SOUL.md' : 'HEARTBEAT.md'
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  return (
-    <div className="border border-dashed border-dark-border rounded-lg overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
-      >
-        <span className="flex items-center gap-1.5">
-          <Plug className="w-3.5 h-3.5 text-yellow-400" />
-          Hub Integration Files — drop these in your OpenClaw workspace
-        </span>
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="px-3 pb-3 space-y-2">
-          <div className="flex gap-1 border-b border-dark-border pb-2">
-            {(['soul', 'heartbeat'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => { setActiveTab(tab); setCopied(false) }}
-                className={`px-2.5 py-1 text-xs rounded font-mono transition-colors ${
-                  activeTab === tab
-                    ? 'bg-accent-purple/20 text-accent-purple border border-accent-purple/30'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                {tab === 'soul' ? 'SOUL.md' : 'HEARTBEAT.md'}
-              </button>
-            ))}
-            <span className="ml-auto text-[10px] text-slate-600 self-center">
-              Drop in OpenClaw workspace dir
-            </span>
-          </div>
-          <textarea
-            readOnly
-            value={content}
-            rows={12}
-            className="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-xs text-slate-400 font-mono resize-y focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/40 text-accent-purple rounded-lg transition-colors"
-          >
-            {copied ? <CheckCircle className="w-3.5 h-3.5" /> : <ExternalLink className="w-3.5 h-3.5" />}
-            {copied ? 'Copied!' : `Copy ${filename}`}
-          </button>
-        </div>
-      )}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={testStatus === 'testing'}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {testStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+          Test Connection
+        </button>
+        {testStatus === 'ok' && (
+          <span className="flex items-center gap-1 text-xs text-green-400">
+            <CheckCircle className="w-3.5 h-3.5" />
+            {testMsg}
+          </span>
+        )}
+        {testStatus === 'error' && (
+          <span className="flex items-center gap-1 text-xs text-red-400">
+            <AlertCircle className="w-3.5 h-3.5" />
+            {testMsg}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

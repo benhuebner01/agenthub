@@ -3,7 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
 import { db } from '../db';
-import { runs, auditLogs, agents, agentMemory, proposals, schedules } from '../db/schema';
+import { runs, auditLogs, agents, agentMemory, proposals } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -11,18 +11,16 @@ const execAsync = promisify(exec);
 
 // ─── Model Pricing ────────────────────────────────────────────────────────────
 
-const CLAUDE_MODELS: Record<string, { inputCostPerMTok: number; outputCostPerMTok: number }> = {
+const CLAUDE_MODELS = {
   'claude-opus-4-6': { inputCostPerMTok: 5, outputCostPerMTok: 25 },
   'claude-sonnet-4-6': { inputCostPerMTok: 3, outputCostPerMTok: 15 },
   'claude-haiku-4-5-20251001': { inputCostPerMTok: 1, outputCostPerMTok: 5 },
-  'claude-haiku-4-5': { inputCostPerMTok: 1, outputCostPerMTok: 5 },
 };
 
-const OPENAI_MODELS: Record<string, { inputCostPerMTok: number; outputCostPerMTok: number }> = {
-  'gpt-5.2': { inputCostPerMTok: 1.75, outputCostPerMTok: 14 },
-  'gpt-5-mini': { inputCostPerMTok: 0.25, outputCostPerMTok: 2 },
-  'gpt-5-nano': { inputCostPerMTok: 0.05, outputCostPerMTok: 0.4 },
-  'gpt-4.1': { inputCostPerMTok: 2, outputCostPerMTok: 8 },
+const OPENAI_MODELS = {
+  'gpt-5.4-pro': { inputCostPerMTok: 2.5, outputCostPerMTok: 15 },
+  'gpt-5.4-nano': { inputCostPerMTok: 0.2, outputCostPerMTok: 1.25 },
+  'gpt-5.4-mini': { inputCostPerMTok: 0.2, outputCostPerMTok: 1.25 },
   'gpt-4o': { inputCostPerMTok: 2.5, outputCostPerMTok: 10 },
   'gpt-4o-mini': { inputCostPerMTok: 0.15, outputCostPerMTok: 0.6 },
   'o3': { inputCostPerMTok: 2, outputCostPerMTok: 8 },
@@ -87,107 +85,6 @@ async function parseCeoProposals(
       // Malformed JSON in proposal block — skip silently
     }
   }
-}
-
-// ─── CEO Override Actions ────────────────────────────────────────────────────
-
-async function applyCeoActions(
-  output: unknown,
-  agentRecord: { id: string; organizationId?: string | null; role?: string | null }
-): Promise<{ agentUpdates: number; scheduleUpdates: number }> {
-  if (agentRecord.role !== 'ceo') return { agentUpdates: 0, scheduleUpdates: 0 };
-
-  const text = typeof output === 'string' ? output
-    : (output as any)?.text ? (output as any).text : JSON.stringify(output);
-
-  let agentUpdates = 0;
-  let scheduleUpdates = 0;
-
-  // Parse <agent_update> blocks — CEO can override agent instructions/config
-  const agentUpdateRegex = /<agent_update>([\s\S]*?)<\/agent_update>/g;
-  let match;
-  while ((match = agentUpdateRegex.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1].trim());
-      if (!parsed.agentId) continue;
-
-      const [existingAgent] = await db.select().from(agents).where(eq(agents.id, parsed.agentId));
-      if (!existingAgent) continue;
-      // Only allow CEO to update agents in the same organization
-      if (existingAgent.organizationId !== agentRecord.organizationId) continue;
-
-      const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-      if (parsed.systemPrompt || parsed.system_prompt) {
-        const currentConfig = (existingAgent.config as Record<string, unknown>) || {};
-        updates.config = { ...currentConfig, system_prompt: parsed.systemPrompt || parsed.system_prompt };
-      }
-      if (parsed.jobDescription) updates.jobDescription = parsed.jobDescription;
-      if (parsed.status && ['active', 'paused'].includes(parsed.status)) updates.status = parsed.status;
-
-      await db.update(agents).set(updates).where(eq(agents.id, parsed.agentId));
-      agentUpdates++;
-
-      await db.insert(auditLogs).values({
-        id: uuidv4(),
-        agentId: parsed.agentId,
-        eventType: 'ceo_agent_update',
-        data: { updatedBy: agentRecord.id, changes: parsed },
-        createdAt: new Date().toISOString(),
-      });
-    } catch {
-      // Malformed JSON — skip
-    }
-  }
-
-  // Parse <schedule_update> blocks — CEO can change schedules
-  const scheduleUpdateRegex = /<schedule_update>([\s\S]*?)<\/schedule_update>/g;
-  while ((match = scheduleUpdateRegex.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1].trim());
-      if (!parsed.agentId) continue;
-
-      // Verify agent belongs to same org
-      const [targetAgent] = await db.select().from(agents).where(eq(agents.id, parsed.agentId));
-      if (!targetAgent || targetAgent.organizationId !== agentRecord.organizationId) continue;
-
-      const existingSchedules = await db.select().from(schedules).where(eq(schedules.agentId, parsed.agentId));
-
-      if (existingSchedules.length > 0 && parsed.cronExpression) {
-        // Update existing schedule
-        await db.update(schedules)
-          .set({
-            cronExpression: parsed.cronExpression,
-            enabled: parsed.enabled !== false,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schedules.id, existingSchedules[0].id));
-        scheduleUpdates++;
-      } else if (parsed.cronExpression) {
-        // Create new schedule
-        await db.insert(schedules).values({
-          id: uuidv4(),
-          agentId: parsed.agentId,
-          cronExpression: parsed.cronExpression,
-          enabled: parsed.enabled !== false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-        scheduleUpdates++;
-      }
-
-      await db.insert(auditLogs).values({
-        id: uuidv4(),
-        agentId: parsed.agentId,
-        eventType: 'ceo_schedule_update',
-        data: { updatedBy: agentRecord.id, changes: parsed },
-        createdAt: new Date().toISOString(),
-      });
-    } catch {
-      // Malformed JSON — skip
-    }
-  }
-
-  return { agentUpdates, scheduleUpdates };
 }
 
 // ─── HTTP Agent ───────────────────────────────────────────────────────────────
@@ -276,7 +173,7 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
   }
 
   const client = new OpenAI({ apiKey });
-  const model = (config.model as string) || 'gpt-5.2';
+  const model = (config.model as string) || 'gpt-4o';
   const baseSystemPrompt = (config.system_prompt as string) || (config.systemPrompt as string) || 'You are a helpful assistant.';
   const systemPrompt = baseSystemPrompt + memoryContext;
 
@@ -345,41 +242,23 @@ async function executeBashAgent(config: Record<string, unknown>, input: unknown)
 // ─── Claude Code CLI Agent ────────────────────────────────────────────────────
 
 async function executeClaudeCodeAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  const { execSync } = require('child_process');
   const model = (config.model as string) || 'claude-sonnet-4-6';
   const maxTurns = (config.maxTurns as number) || 5;
   const workDir = (config.workDir as string) || process.cwd();
   const prompt = typeof input === 'string' ? input : JSON.stringify(input);
 
-  // Build command: claude -p "<prompt>" --output-format json --max-turns N --model M
-  // Flags verified from official docs: https://code.claude.com/docs/en/cli-reference
-  const args: string[] = [
-    '-p', prompt,
-    '--output-format', 'json',
-    '--max-turns', String(maxTurns),
-    '--model', model,
-  ];
-  if (config.systemPrompt) {
-    args.push('--system-prompt', String(config.systemPrompt));
-  }
-  if (config.allowedTools) {
-    // --allowedTools: tools that execute without prompting for permission
-    const tools = Array.isArray(config.allowedTools) ? config.allowedTools : [config.allowedTools];
-    for (const tool of tools) {
-      args.push('--allowedTools', String(tool));
-    }
-  }
-  if (config.maxBudgetUsd) {
-    args.push('--max-budget-usd', String(config.maxBudgetUsd));
-  }
+  let cmd = `claude -p ${JSON.stringify(prompt)} --output-format json --max-turns ${maxTurns} --model ${model}`;
+  if (config.systemPrompt) cmd += ` --system-prompt ${JSON.stringify(config.systemPrompt)}`;
+  if (config.tools) cmd += ` --tools ${config.tools}`;
 
   try {
-    const { execFileSync } = require('child_process');
-    const stdout = execFileSync('claude', args, { cwd: workDir, timeout: 120000, encoding: 'utf8' });
+    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8' });
     const result = JSON.parse(stdout);
     return {
       success: true,
       output: result,
-      tokensUsed: (result.usage?.input_tokens || 0) + (result.usage?.output_tokens || 0),
+      tokensUsed: result.usage?.input_tokens + result.usage?.output_tokens || 0,
       costUsd: 0,
     };
   } catch (err: any) {
@@ -390,29 +269,19 @@ async function executeClaudeCodeAgent(config: Record<string, unknown>, input: un
 // ─── OpenAI Codex CLI Agent ───────────────────────────────────────────────────
 
 async function executeOpenAICodexAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
+  const { execSync } = require('child_process');
   const workDir = (config.workDir as string) || process.cwd();
+  const mode = (config.mode as string) || 'full-auto';
   const prompt = typeof input === 'string' ? input : JSON.stringify(input);
 
-  const env = { ...process.env } as Record<string, string>;
-  if (config.apiKeyOverride) env.CODEX_API_KEY = config.apiKeyOverride as string;
+  const env = { ...process.env };
+  if (config.apiKeyOverride) (env as any).OPENAI_API_KEY = config.apiKeyOverride;
 
-  // Build command: codex exec "<prompt>" --full-auto --json
-  // Flags verified from official docs: https://developers.openai.com/codex/cli/reference
-  const args: string[] = ['exec', prompt, '--full-auto', '--json'];
+  let cmd = `codex --${mode} --output-format json ${JSON.stringify(prompt)}`;
 
   try {
-    const { execFileSync } = require('child_process');
-    const stdout = execFileSync('codex', args, { cwd: workDir, timeout: 120000, encoding: 'utf8', env });
-    // Codex --json outputs newline-delimited JSON events; parse last line for final result
-    const lines = stdout.trim().split('\n').filter((l: string) => l.trim());
-    const lastLine = lines[lines.length - 1];
-    let result: any;
-    try {
-      result = JSON.parse(lastLine);
-    } catch {
-      result = { text: stdout.trim() };
-    }
-    return { success: true, output: result, tokensUsed: 0, costUsd: 0 };
+    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8', env });
+    return { success: true, output: JSON.parse(stdout), tokensUsed: 0, costUsd: 0 };
   } catch (err: any) {
     return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
   }
@@ -421,44 +290,26 @@ async function executeOpenAICodexAgent(config: Record<string, unknown>, input: u
 // ─── Cursor Agent ─────────────────────────────────────────────────────────────
 
 async function executeCursorAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  // NOTE: Cursor does not currently have an official headless/non-interactive CLI mode.
-  // The `cursor` CLI is primarily for opening files/folders in the IDE.
-  // This executor attempts to use Cursor's background agent API if configured,
-  // otherwise falls back to HTTP API if a Cursor server URL is provided.
+  const { execSync } = require('child_process');
   const workDir = (config.workDir as string) || process.cwd();
+  const fmt = (config.outputFormat as string) || 'text';
   const prompt = typeof input === 'string' ? input : JSON.stringify(input);
 
-  // If a Cursor server endpoint is configured, use HTTP API
-  if (config.serverUrl) {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey as string}`;
-      const resp = await axios.post(config.serverUrl as string, { prompt, workDir }, { headers, timeout: 120000 });
-      return { success: true, output: resp.data, tokensUsed: 0, costUsd: 0 };
-    } catch (err: any) {
-      return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.response?.data?.error || err.message };
-    }
-  }
+  const env = { ...process.env };
+  if (config.apiKey) (env as any).CURSOR_API_KEY = config.apiKey;
 
-  // Fallback: try running cursor CLI (experimental, may not work in all setups)
+  const cmd = `cursor --print ${JSON.stringify(prompt)} --output-format ${fmt}`;
+
   try {
-    const { execFileSync } = require('child_process');
-    const stdout = execFileSync('cursor', ['--goto', workDir], { cwd: workDir, timeout: 30000, encoding: 'utf8' });
+    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8', env });
     return {
-      success: false,
-      output: null,
+      success: true,
+      output: fmt === 'json' ? JSON.parse(stdout) : stdout,
       tokensUsed: 0,
       costUsd: 0,
-      error: 'Cursor does not support headless CLI mode. Configure a serverUrl for HTTP-based integration, or use Claude Code or Codex CLI instead.',
     };
   } catch (err: any) {
-    return {
-      success: false,
-      output: null,
-      tokensUsed: 0,
-      costUsd: 0,
-      error: 'Cursor headless mode is not available. The Cursor CLI only supports opening files/folders. Configure serverUrl for HTTP integration.',
-    };
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
   }
 }
 
@@ -559,7 +410,7 @@ async function executeInternalAgent(config: Record<string, unknown>, input: unkn
   } else {
     const OpenAI = require('openai');
     const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
-    const model = (config.model as string) || 'gpt-5.2';
+    const model = (config.model as string) || 'gpt-4o';
     const baseSystemPrompt = (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.';
     const systemPrompt = baseSystemPrompt + memoryContext;
     const resp = await client.chat.completions.create({
@@ -736,17 +587,12 @@ export async function executeAgent(
       createdAt: new Date().toISOString(),
     });
 
-    // If agent is CEO, parse output for proposal blocks and override actions
-    const ceoContext = {
+    // If agent is CEO, parse output for proposal blocks
+    await parseCeoProposals(result.output, {
       id: agentRecord.id,
       organizationId: agentRecord.organizationId,
       role: agentRecord.role,
-    };
-    await parseCeoProposals(result.output, ceoContext);
-    const ceoActions = await applyCeoActions(result.output, ceoContext);
-    if (ceoActions.agentUpdates > 0 || ceoActions.scheduleUpdates > 0) {
-      console.log(`[CEO] Applied ${ceoActions.agentUpdates} agent updates, ${ceoActions.scheduleUpdates} schedule updates`);
-    }
+    });
 
     return result;
   } catch (err) {

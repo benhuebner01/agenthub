@@ -24,7 +24,7 @@ async function callAI(systemPrompt: string, userMessage: string): Promise<string
     const OpenAI = require('openai');
     const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
     const resp = await client.chat.completions.create({
-      model: 'gpt-5.2',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
@@ -33,29 +33,6 @@ async function callAI(systemPrompt: string, userMessage: string): Promise<string
     return resp.choices[0]?.message?.content || '';
   }
   throw new Error('No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.');
-}
-
-function buildCostTable(): string {
-  return `
-Model cost reference (per million tokens):
-| Model | Input $/MTok | Output $/MTok | Best for |
-|-------|-------------|---------------|----------|
-| claude-opus-4-6 | $5.00 | $25.00 | Complex reasoning, strategy |
-| claude-sonnet-4-6 | $3.00 | $15.00 | General tasks, good balance |
-| claude-haiku-4-5 | $1.00 | $5.00 | Fast, simple tasks, cheapest Claude |
-| gpt-5.2 | $1.75 | $14.00 | OpenAI flagship, complex tasks |
-| gpt-5-mini | $0.25 | $2.00 | Fast, good quality, cost-effective |
-| gpt-5-nano | $0.05 | $0.40 | Ultra cheap, simple tasks only |
-| gpt-4.1 | $2.00 | $8.00 | Previous gen, still reliable |
-| o3 | $2.00 | $8.00 | Advanced reasoning |
-| o4-mini | $1.10 | $4.40 | Fast reasoning, cost-effective |
-
-Typical monthly costs per agent:
-- Light use (1K calls/month, ~1K tokens avg): $0.50-5
-- Medium use (10K calls/month): $5-50
-- Heavy use (100K+ calls/month): $50-500
-- HTTP/bash agents: $0 (no token costs)
-`;
 }
 
 // ─── POST /api/business/analyze ──────────────────────────────────────────────
@@ -74,104 +51,64 @@ router.post('/analyze', async (req: Request, res: Response) => {
       ? availableConnections.join(', ')
       : 'claude, openai, http, bash';
 
-    const costTable = buildCostTable();
+    const systemPrompt = `You are an expert AI business consultant and system architect.
+Your job is to analyze a business and design an optimal AI agent organization.
 
-    const systemPrompt = `You are an expert AI organizational architect and business automation consultant.
-Your task: design a complete, realistic AI agent organization for a business.
+Available agent types and their capabilities:
+- claude: Anthropic Claude AI (reasoning, writing, analysis, complex tasks)
+- openai: OpenAI GPT models (reasoning, writing, code generation)
+- http: HTTP webhook agent (call external APIs and services)
+- bash: Bash command agent (run shell scripts, system tasks)
+- internal: Internal AgentHub AI (system management, orchestration)
+- claude-code: Claude Code CLI (coding tasks, repository management)
+- a2a: Agent-to-Agent protocol (communicate with other AI agents)
 
-## Agent Types Available
-| Type | Best For | Notes |
-|------|----------|-------|
-| claude | Reasoning, writing, strategy, analysis | Use claude-sonnet-4-6 for most tasks |
-| openai | Code gen, data analysis, chat | Use gpt-5.2 for complex, gpt-5-mini for simple |
-| internal | General assistant tasks | Uses hub's configured provider, easiest setup |
-| http | Calling external APIs, webhooks, n8n/Zapier/Make | Zero AI cost |
-| bash | Shell scripts, file processing, system tasks | Zero AI cost |
-| claude-code | Autonomous coding (runs Claude Code CLI on server) | Requires Claude Code installed |
-| openai-codex | Autonomous coding (runs Codex CLI on server) | Requires Codex installed |
-| mcp | Connect to MCP tool servers (filesystem, github, etc.) | Requires MCP server running |
-| a2a | Communicate with other AI agents via A2A protocol | For multi-agent coordination |
+Roles available:
+- ceo: Top-level strategic agent, manages the whole org, proposes new hires
+- manager: Mid-level agent that oversees workers in a domain
+- worker: Executes specific tasks
+- specialist: Expert in a narrow domain
 
-## Org Structure Rules
-- Exactly 1 CEO (strategic, supervises all, proposes changes, writes <proposal> blocks)
-- 0-2 Managers (department heads for groups of workers)
-- 2-5 Workers (execute specific recurring tasks)
-- 0-2 Specialists (unique domain experts)
-- Total team: 4-8 agents (CEO + 3-7 others)
-- Keep it lean — only create agents for real, recurring workflows
-
-## System Prompt Design
-For each agent, write a focused, 3-6 sentence system prompt that:
-1. States their role and department
-2. Describes the specific tasks they handle
-3. Defines their output format (report, JSON, action, etc.)
-4. Names who they report to
-
-## CEO System Prompt Template (ALWAYS use this structure)
-"You are [Name], CEO of [OrgName]'s AI division. You oversee [X] agents across [departments].
-Your job: review weekly performance, identify bottlenecks, and propose strategic improvements.
-To update agent instructions, write: <agent_update><agentName>Name</agentName><field>systemPrompt</field><value>new prompt</value></agent_update>
-To propose hiring a new agent: <proposal><type>hire_agent</type><title>Role Title</title><description>Why we need them</description></proposal>
-Always end your reports with a prioritized action list."
-
-${costTable}
-
-## Cost Guidelines
-- Use gpt-5-nano or claude-haiku-4-5 for high-volume simple tasks
-- Use claude-sonnet-4-6 or gpt-5.2 for complex reasoning (CEO, managers)
-- Use http/bash agents where AI is not needed (saves 100% of token costs)
-- Estimate calls/month based on realistic business usage
-
-Respond with ONLY valid JSON (no markdown, no comments):
+You must respond with ONLY valid JSON matching exactly this structure (no markdown, no explanation):
 {
   "organization": {
     "name": "string",
-    "description": "string — 1-2 sentences about the org",
+    "description": "string",
     "industry": "string",
     "goals": ["string"]
   },
   "ceoAgent": {
-    "name": "string — e.g. 'Aria Chen, AI CEO'",
+    "name": "string",
     "description": "string",
-    "type": "claude",
-    "config": {"model": "claude-sonnet-4-6", "systemPrompt": "string — full CEO system prompt"},
-    "jobDescription": "string — 2-3 sentences on CEO responsibilities"
+    "type": "claude|openai|internal",
+    "config": {},
+    "jobDescription": "string"
   },
   "proposedTeam": [
     {
-      "name": "string — e.g. 'Marketing Manager'",
+      "name": "string",
       "role": "manager|worker|specialist",
       "description": "string",
-      "type": "claude|openai|http|bash|internal|mcp",
-      "config": {"model": "string", "systemPrompt": "string — focused 3-5 sentence system prompt"},
-      "jobDescription": "string — what this agent does day-to-day",
+      "type": "claude|openai|http|bash|internal",
+      "config": {},
+      "jobDescription": "string",
       "reportsTo": "ceo|<agentName>"
     }
   ],
-  "reasoning": "string — why this org structure fits the business",
+  "reasoning": "string",
   "estimatedMonthlyCostUsd": number,
-  "costBreakdown": [
-    {"agentName": "string", "model": "string", "estimatedCallsPerMonth": number, "estimatedCostUsd": number}
-  ],
-  "alternatives": [
-    {"description": "string — e.g. 'Budget version with smaller models'", "estimatedMonthlyCostUsd": number, "tradeoff": "string"},
-    {"description": "string — e.g. 'Premium version with Opus for CEO'", "estimatedMonthlyCostUsd": number, "tradeoff": "string"}
-  ],
-  "recommendation": "string — 2-3 sentences on why this configuration is optimal for this business"
+  "recommendation": "string"
 }`;
 
-    const userMessage = `Design an AI agent organization for this business:
-
-**Company:** ${name}
-**Industry:** ${industry || 'General/Other'}
-**Description:** ${description}
-**Business Goals:**
+    const userMessage = `Business to analyze:
+Name: ${name}
+Industry: ${industry || 'Not specified'}
+Description: ${description}
+Goals:
 - ${goalsStr}
-**Available integrations:** ${connectionsStr}
+Available integrations: ${connectionsStr}
 
-Create a realistic, production-ready agent org that automates this business's core workflows.
-Focus on agents that will actually run regularly and create real value.
-Use http/bash agents where full AI is overkill. Keep the team lean (4-8 total agents).`;
+Design the optimal AI agent organization for this business. Include 1 CEO and 3-6 team agents.`;
 
     const rawResponse = await callAI(systemPrompt, userMessage);
 
@@ -385,71 +322,26 @@ router.post('/organizations/:id/ceo-run', async (req: Request, res: Response) =>
     const goalsStr = Array.isArray(org.goals) ? (org.goals as string[]).join(', ') : String(org.goals || '');
     const teamStr = teamAgents.map((a) => `- ${a.name} (${a.role}): ${a.jobDescription || a.description || 'No description'}`).join('\n');
 
-    // Per-agent performance stats
-    const agentStatsStr = teamAgents.map(a => {
-      const agentRuns = orgRuns.filter(r => r.agentId === a.id);
-      const agentSuccess = agentRuns.filter(r => r.status === 'success').length;
-      const agentCost = agentRuns.reduce((sum, r) => sum + (Number(r.costUsd) || 0), 0);
-      return `  - ${a.name} (${a.role}, ${a.type}): ${agentRuns.length} runs, ${agentRuns.length > 0 ? Math.round((agentSuccess / agentRuns.length) * 100) : 0}% success, $${agentCost.toFixed(4)} spent`;
-    }).join('\n');
-
-    // Get pending proposals
-    const pendingProposals = await db.select().from(proposals)
-      .where(and(
-        eq(proposals.organizationId, orgId),
-        eq(proposals.status, 'pending')
-      ));
-
-    const proposalsStr = pendingProposals.length > 0
-      ? pendingProposals.map(p => `  - [${p.type}] "${p.title}" (est. $${p.estimatedCostUsd || 0}/mo)`).join('\n')
-      : '  None';
-
-    const costTable = buildCostTable();
-
-    // Build CEO system prompt with full organizational context (heartbeat)
+    // Build CEO system prompt with full organizational context
     const ceoSystemPrompt = `You are the CEO of ${org.name}. Your mission: ${goalsStr}.
-
-═══ ORGANIZATION HEARTBEAT ═══
 
 Your team:
 ${teamStr || 'No team members yet.'}
 
-Per-agent performance (last 30 days):
-${agentStatsStr || '  No data yet.'}
-
-Aggregate performance:
+Recent performance (last 30 days):
 - Total runs: ${totalRuns}
 - Success rate: ${successRate}%
 - Total cost: $${totalCost.toFixed(4)}
 
-Pending proposals awaiting user approval:
-${proposalsStr}
-
-${costTable}
-
-═══ YOUR CAPABILITIES ═══
-
-You can take three types of actions by including XML blocks in your response:
-
-1. UPDATE AGENT INSTRUCTIONS — Immediately change a sub-agent's system prompt, job description, or status:
-<agent_update>
-{"agentId": "<agent-id>", "systemPrompt": "New instructions...", "jobDescription": "Updated role...", "status": "active|paused"}
-</agent_update>
-
-2. UPDATE SCHEDULES — Change how often a sub-agent runs:
-<schedule_update>
-{"agentId": "<agent-id>", "cronExpression": "0 */6 * * *", "enabled": true}
-</schedule_update>
-
-3. PROPOSE CHANGES — Propose hiring, restructuring, or strategy changes (requires user approval):
+When you decide to hire a new agent or make strategic changes, output a JSON block like:
 <proposal>
-{"type": "hire_agent|restructure|budget_increase|strategy", "title": "...", "reasoning": "...", "agentConfig": {"name": "...", "type": "claude", "role": "specialist", "config": {"model": "claude-haiku-4-5", "system_prompt": "..."}}, "estimatedMonthlyCostUsd": 5}
+{"type": "hire_agent", "title": "Hire Research Specialist", "reasoning": "We need better research capabilities", "agentConfig": {"name": "Research Agent", "type": "claude", "role": "specialist", "config": {"system_prompt": "You are a research specialist."}}, "estimatedMonthlyCostUsd": 10}
 </proposal>
 
-IMPORTANT: agent_update and schedule_update are applied immediately. Proposals require user approval.
-Only update agents that belong to your organization. Be strategic about costs.
-
-═══ CURRENT TASK ═══
+For restructuring or strategy proposals:
+<proposal>
+{"type": "strategy", "title": "Improve Content Pipeline", "reasoning": "Current output is too slow", "details": {}, "estimatedMonthlyCostUsd": 0}
+</proposal>
 
 Analyze the situation and respond to: ${userInput || 'Please analyze our current organizational performance and recommend improvements.'}`;
 

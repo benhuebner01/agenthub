@@ -9,6 +9,7 @@ import {
   ScrollText,
   Building2,
   TrendingUp,
+  ClipboardList,
   Settings,
   Sparkles,
 } from 'lucide-react'
@@ -67,15 +68,33 @@ export default function Sidebar() {
                 }
               >
                 <Icon className="w-4.5 h-4.5 shrink-0" size={18} />
-                <span className="flex-1">{label}</span>
-                {label === 'Organization' && pendingCount > 0 && (
-                  <span className="ml-auto px-1.5 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded-full">
-                    {pendingCount}
-                  </span>
-                )}
+                {label}
               </NavLink>
             </li>
           ))}
+
+          {/* Proposals with badge */}
+          <li>
+            <NavLink
+              to="/organization"
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'bg-accent-purple/20 text-accent-purple border border-accent-purple/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                )
+              }
+            >
+              <ClipboardList size={18} className="shrink-0" />
+              <span className="flex-1">Proposals</span>
+              {pendingCount > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded-full">
+                  {pendingCount}
+                </span>
+              )}
+            </NavLink>
+          </li>
         </ul>
       </nav>
 

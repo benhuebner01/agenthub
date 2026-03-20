@@ -6,12 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "build:client": "cd client && npm run build",
-    "build:all": "npm run build && npm run build:client",
     "start": "node dist/index.js",
-    "start:fresh": "npm run build:all && node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
     "seed": "tsx src/db/seed.ts",
+    "build:client": "cd client && npm run build",
     "dev:client": "cd client && npm run dev",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:client\""
   },
