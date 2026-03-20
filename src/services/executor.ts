@@ -315,44 +315,118 @@ async function executeCursorAgent(config: Record<string, unknown>, input: unknow
 }
 
 // ─── OpenClaw Agent ───────────────────────────────────────────────────────────
-// OpenClaw real API: POST /api/agent/run  { prompt, model? }
-// Response:          { result, success, error?, tokens? }
+//
+// OpenClaw supports 4 connection modes (docs.openclaw.ai):
+//
+//  'responses'    POST /v1/responses          — full agent run, OpenAI Responses API
+//                                               format; gateway.auth.token required;
+//                                               disabled by default, must be enabled
+//  'tools-invoke' POST /tools/invoke          — single tool call; always active
+//  'webhook'      POST /hooks/<path>          — event-driven trigger; hooks.enabled=true
+//                                               + hooks.token required
+//  'cli'          openclaw agent --agent <id> — local CLI; same machine only
+//
+// Default: 'responses'
 
 async function executeOpenClawAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
-  const host = (config.host as string) || 'localhost';
-  const port = (config.port as number) || 18789;
-  const baseURL = `http://${host}:${port}`;
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (config.token) headers['Authorization'] = `Bearer ${config.token as string}`;
-
-  // Build the prompt — prepend system prompt if configured
-  const promptText = typeof input === 'string' ? input : JSON.stringify(input);
-  const fullPrompt = config.systemPrompt
+  const host             = (config.host as string)   || 'localhost';
+  const port             = (config.port as number)   || 18789;
+  const baseURL          = `http://${host}:${port}`;
+  const connectionType   = (config.connectionType as string) || 'responses';
+  const gatewayToken     = config.token as string | undefined;
+  const promptText       = typeof input === 'string' ? input : JSON.stringify(input);
+  const fullPrompt       = config.systemPrompt
     ? `${config.systemPrompt as string}\n\n${promptText}`
     : promptText;
 
-  const body: Record<string, unknown> = { prompt: fullPrompt };
-  // model is optional — 'gpt' | 'claude' | 'gemini' | undefined (OpenClaw picks default)
-  if (config.model && config.model !== 'auto') body.model = config.model;
+  // ── 1. Local CLI ────────────────────────────────────────────────────────────
+  if (connectionType === 'cli') {
+    const ocAgentId = config.ocAgentId as string | undefined;
+    const cmd = ocAgentId
+      ? `openclaw agent --agent ${JSON.stringify(ocAgentId)} --prompt ${JSON.stringify(fullPrompt)}`
+      : `openclaw --prompt ${JSON.stringify(fullPrompt)}`;
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 120_000 });
+      return { success: true, output: (stdout || stderr).trim(), tokensUsed: 0, costUsd: 0 };
+    } catch (err: any) {
+      return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+    }
+  }
+
+  const apiHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (gatewayToken) apiHeaders['Authorization'] = `Bearer ${gatewayToken}`;
+
+  // ── 2. Webhook Trigger  POST /hooks/<path> ──────────────────────────────────
+  if (connectionType === 'webhook') {
+    const hookPath    = ((config.webhookPath as string) || '/hooks/agenthub').replace(/^([^/])/, '/$1');
+    const hookToken   = (config.webhookToken as string) || gatewayToken;
+    const hookHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (hookToken) hookHeaders['Authorization'] = `Bearer ${hookToken}`;
+
+    try {
+      const resp = await axios.post(
+        `${baseURL}${hookPath}`,
+        { prompt: fullPrompt, input: typeof input === 'object' ? input : { prompt: fullPrompt } },
+        { headers: hookHeaders, timeout: 120_000 },
+      );
+      const data = resp.data as any;
+      const output = data.result ?? data.output ?? data.response ?? JSON.stringify(data);
+      return { success: true, output, tokensUsed: 0, costUsd: 0 };
+    } catch (err: any) {
+      const msg = err.response?.data?.error ?? err.response?.data?.message ?? err.message ?? 'Webhook error';
+      return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: msg };
+    }
+  }
+
+  // ── 3. Tools Invoke  POST /tools/invoke ─────────────────────────────────────
+  if (connectionType === 'tools-invoke') {
+    const toolName = (config.toolName as string) || 'run';
+    try {
+      const resp = await axios.post(
+        `${baseURL}/tools/invoke`,
+        { tool: toolName, input: { prompt: fullPrompt } },
+        { headers: apiHeaders, timeout: 120_000 },
+      );
+      const data = resp.data as any;
+      const output = data.result ?? data.output ?? JSON.stringify(data);
+      const tokensUsed = data.usage ? ((data.usage.input_tokens || 0) + (data.usage.output_tokens || 0)) : 0;
+      return { success: true, output, tokensUsed, costUsd: 0 };
+    } catch (err: any) {
+      const msg = err.response?.data?.error ?? err.message ?? 'Tools-invoke error';
+      return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: msg };
+    }
+  }
+
+  // ── 4. OpenResponses API  POST /v1/responses  (default) ─────────────────────
+  // Must be enabled in OpenClaw config (gateway.openResponses.enabled = true).
+  // Uses the OpenAI Responses API wire format.
+  const model = (config.model as string) && config.model !== 'auto' ? config.model as string : undefined;
+  const body: Record<string, unknown> = { input: fullPrompt };
+  if (model) body.model = model;
 
   try {
-    const resp = await axios.post(`${baseURL}/api/agent/run`, body, { headers, timeout: 120_000 });
-    // OpenClaw returns: { result, success, error?, tokens? }
-    const data = resp.data as { result?: string; output?: string; success?: boolean; error?: string; tokens?: number };
-    const content = data.result ?? data.output ?? JSON.stringify(data);
-    return {
-      success: data.success !== false,
-      output: content,
-      tokensUsed: data.tokens ?? 0,
-      costUsd: 0,
-    };
+    const resp = await axios.post(`${baseURL}/v1/responses`, body, { headers: apiHeaders, timeout: 120_000 });
+    const data = resp.data as any;
+
+    // Parse OpenAI Responses API format: output[].content[].text
+    let output: string;
+    if (Array.isArray(data.output)) {
+      output = (data.output as any[])
+        .flatMap((o: any) => (o.content as any[]) || [])
+        .filter((c: any) => c.type === 'output_text' || c.type === 'text')
+        .map((c: any) => c.text ?? c.output_text ?? '')
+        .join('') || JSON.stringify(data);
+    } else {
+      output = data.result ?? data.output ?? data.response ?? data.text ?? JSON.stringify(data);
+    }
+
+    const tokensUsed = data.usage
+      ? ((data.usage.input_tokens || 0) + (data.usage.output_tokens || 0))
+      : 0;
+
+    return { success: true, output, tokensUsed, costUsd: 0 };
   } catch (err: any) {
-    const msg =
-      err.response?.data?.error ??
-      err.response?.data?.message ??
-      err.message ??
-      'OpenClaw unreachable';
+    const msg = err.response?.data?.error ?? err.response?.data?.message ?? err.message ?? 'OpenClaw /v1/responses error';
     return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: msg };
   }
 }

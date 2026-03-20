@@ -1394,6 +1394,20 @@ function CursorConfig({
 }
 
 // ─── OpenClaw Config ──────────────────────────────────────────────────────────
+// Connection modes (docs.openclaw.ai):
+//  responses    → POST /v1/responses   (full agent run, OpenAI Responses API)
+//  tools-invoke → POST /tools/invoke   (single tool, always active)
+//  webhook      → POST /hooks/<path>   (event trigger, hooks.enabled required)
+//  cli          → openclaw agent --agent <id>  (local CLI, same machine only)
+
+type OcConnectionType = 'responses' | 'tools-invoke' | 'webhook' | 'cli'
+
+const OC_CONNECTION_OPTIONS: { value: OcConnectionType; label: string; desc: string }[] = [
+  { value: 'responses',    label: 'OpenResponses API',  desc: 'POST /v1/responses — full agent run (recommended, must be enabled in OpenClaw)' },
+  { value: 'tools-invoke', label: 'Tools Invoke API',   desc: 'POST /tools/invoke — single tool call, always active' },
+  { value: 'webhook',      label: 'Webhook Trigger',    desc: 'POST /hooks/<path> — event-driven, hooks.enabled=true + hooks.token required' },
+  { value: 'cli',          label: 'Local CLI',          desc: 'openclaw agent --agent <id> — only works when OpenClaw is on the same machine' },
+]
 
 function OpenClawConfig({
   config,
@@ -1404,28 +1418,58 @@ function OpenClawConfig({
   onChange: (c: Record<string, unknown>) => void
   agentId?: string
 }) {
-  const [host, setHost] = useState((config.host as string) || 'localhost')
-  const [port, setPort] = useState(String((config.port as number) || 18789))
-  const [model, setModel] = useState((config.model as string) || 'auto')
-  const [token, setToken] = useState((config.token as string) || '')
+  const [connectionType, setConnectionType] = useState<OcConnectionType>(
+    (config.connectionType as OcConnectionType) || 'responses'
+  )
+  // Shared
+  const [host,         setHost]         = useState((config.host as string)         || 'localhost')
+  const [port,         setPort]         = useState(String((config.port as number)  || 18789))
+  const [model,        setModel]        = useState((config.model as string)        || 'auto')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
+  // responses + tools-invoke
+  const [gatewayToken, setGatewayToken] = useState((config.token as string)        || '')
+  const [ocAgentId,    setOcAgentId]    = useState((config.ocAgentId as string)    || '')
+  // tools-invoke
+  const [toolName,     setToolName]     = useState((config.toolName as string)     || 'run')
+  // webhook
+  const [webhookPath,  setWebhookPath]  = useState((config.webhookPath as string)  || '/hooks/agenthub')
+  const [webhookToken, setWebhookToken] = useState((config.webhookToken as string) || '')
+  // test
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
-  const [testMsg, setTestMsg] = useState('')
-  const [soulMd, setSoulMd] = useState<string | null>(null)
+  const [testMsg,    setTestMsg]    = useState('')
+  // onboarding docs
+  const [soulMd,      setSoulMd]      = useState<string | null>(null)
   const [heartbeatMd, setHeartbeatMd] = useState<string | null>(null)
   const [bootstrapMd, setBootstrapMd] = useState<string | null>(null)
-  const [hubPrompt, setHubPrompt] = useState<string | null>(null)
-  const [soulLoading, setSoulLoading] = useState(false)
-  const [promptLoading, setPromptLoading] = useState(false)
+  const [hubPrompt,   setHubPrompt]   = useState<string | null>(null)
+  const [docsLoading, setDocsLoading] = useState(false)
   const [activeDoc, setActiveDoc] = useState<'bootstrap' | 'soul' | 'heartbeat' | 'prompt'>('bootstrap')
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    const c: Record<string, unknown> = { host, port: parseInt(port) || 18789, model }
-    if (token) c.token = token
+    const c: Record<string, unknown> = {
+      connectionType,
+      host,
+      port: parseInt(port) || 18789,
+    }
+    if (model && model !== 'auto') c.model = model
     if (systemPrompt) c.systemPrompt = systemPrompt
+    if (connectionType === 'responses' || connectionType === 'tools-invoke') {
+      if (gatewayToken) c.token = gatewayToken
+      if (ocAgentId)    c.ocAgentId = ocAgentId
+    }
+    if (connectionType === 'tools-invoke') {
+      if (toolName) c.toolName = toolName
+    }
+    if (connectionType === 'webhook') {
+      if (webhookPath)  c.webhookPath  = webhookPath
+      if (webhookToken) c.webhookToken = webhookToken
+    }
+    if (connectionType === 'cli') {
+      if (ocAgentId) c.ocAgentId = ocAgentId
+    }
     onChange(c)
-  }, [host, port, model, token, systemPrompt])
+  }, [connectionType, host, port, model, systemPrompt, gatewayToken, ocAgentId, toolName, webhookPath, webhookToken])
 
   const handleTest = async () => {
     setTestStatus('testing')
@@ -1433,10 +1477,7 @@ function OpenClawConfig({
       const result = await discoverOpenclaw(host, parseInt(port) || 18789)
       if (result.connected) {
         setTestStatus('ok')
-        const modelCount = result.models?.length || 0
-        setTestMsg(
-          `Connected${result.version ? ` — OpenClaw v${result.version}` : ''} (${modelCount} model${modelCount !== 1 ? 's' : ''})`
-        )
+        setTestMsg(`Connected${result.version ? ` — OpenClaw v${result.version}` : ''}`)
       } else {
         setTestStatus('error')
         setTestMsg(result.error || 'Not reachable')
@@ -1447,34 +1488,21 @@ function OpenClawConfig({
     }
   }
 
-  const handleGenerateAll = async () => {
+  const handleGenerateDocs = async () => {
     if (!agentId) return
-    setSoulLoading(true)
+    setDocsLoading(true)
     try {
-      const result = await getAgentSoulMd(agentId)
-      setSoulMd(result.data.soulMd)
-      setHeartbeatMd(result.data.heartbeatMd)
-      setBootstrapMd(result.data.bootstrapMd)
+      const [soulResult, promptResult] = await Promise.all([
+        getAgentSoulMd(agentId),
+        getAgentHubPrompt(agentId),
+      ])
+      setSoulMd(soulResult.data.soulMd)
+      setHeartbeatMd(soulResult.data.heartbeatMd)
+      setBootstrapMd(soulResult.data.bootstrapMd)
+      setHubPrompt(promptResult.data.prompt)
       setActiveDoc('bootstrap')
-    } catch {
-      // ignore
-    } finally {
-      setSoulLoading(false)
-    }
-  }
-
-  const handleGeneratePrompt = async () => {
-    if (!agentId) return
-    setPromptLoading(true)
-    try {
-      const result = await getAgentHubPrompt(agentId)
-      setHubPrompt(result.data.prompt)
-      setActiveDoc('prompt')
-    } catch {
-      // ignore
-    } finally {
-      setPromptLoading(false)
-    }
+    } catch { /* ignore */ }
+    finally { setDocsLoading(false) }
   }
 
   const handleCopy = (text: string) => {
@@ -1487,211 +1515,231 @@ function OpenClawConfig({
     const blob = new Blob([content], { type: 'text/plain; charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
+    a.href = url; a.download = filename; a.click()
     URL.revokeObjectURL(url)
   }
 
   const activeContent =
-    activeDoc === 'soul' ? soulMd
-    : activeDoc === 'heartbeat' ? heartbeatMd
-    : activeDoc === 'bootstrap' ? bootstrapMd
-    : hubPrompt
-
+    activeDoc === 'soul' ? soulMd : activeDoc === 'heartbeat' ? heartbeatMd
+    : activeDoc === 'bootstrap' ? bootstrapMd : hubPrompt
   const activeFilename =
-    activeDoc === 'soul' ? 'SOUL.md'
-    : activeDoc === 'heartbeat' ? 'HEARTBEAT.md'
-    : activeDoc === 'bootstrap' ? 'BOOTSTRAP.md'
-    : 'hub-prompt.txt'
+    activeDoc === 'soul' ? 'SOUL.md' : activeDoc === 'heartbeat' ? 'HEARTBEAT.md'
+    : activeDoc === 'bootstrap' ? 'BOOTSTRAP.md' : 'hub-prompt.txt'
 
   return (
     <div className="space-y-3">
-      <InfoBox>
-        OpenClaw läuft lokal auf Port 18789. API: <code className="bg-white/10 px-1 rounded text-xs">POST /api/agent/run</code> — kein OpenAI-Format.{' '}
-        Endpoint: <code className="bg-white/10 px-1 rounded text-xs">http://localhost:18789/api/agent/run</code>
-      </InfoBox>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="col-span-2">
-          <label className={LABEL_CLASS}>Host</label>
-          <input
-            type="text"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder="localhost"
-            className={INPUT_CLASS + ' font-mono text-xs'}
-          />
+      {/* ── Connection Type ─────────────────────────────────────────────────── */}
+      <div>
+        <label className={LABEL_CLASS}>Connection Type</label>
+        <div className="grid grid-cols-2 gap-2">
+          {OC_CONNECTION_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setConnectionType(opt.value)}
+              className={`p-2.5 rounded-lg border text-left transition-colors ${
+                connectionType === opt.value
+                  ? 'border-accent-purple/60 bg-accent-purple/10 text-slate-200'
+                  : 'border-dark-border text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <p className="text-xs font-semibold">{opt.label}</p>
+              <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">{opt.desc}</p>
+            </button>
+          ))}
         </div>
-        <div>
-          <label className={LABEL_CLASS}>Port</label>
-          <input
-            type="number"
-            value={port}
-            onChange={(e) => setPort(e.target.value)}
-            placeholder="18789"
-            className={INPUT_CLASS}
-          />
-        </div>
-      </div>
-      <div>
-        <label className={LABEL_CLASS}>Modell (optional)</label>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className={INPUT_CLASS}
-        >
-          <option value="auto">auto (OpenClaw wählt)</option>
-          <option value="gpt">gpt</option>
-          <option value="claude">claude</option>
-          <option value="gemini">gemini</option>
-        </select>
-      </div>
-      <div>
-        <label className={LABEL_CLASS}>Bearer Token (optional)</label>
-        <input
-          type="password"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          placeholder="your-token"
-          className={INPUT_CLASS}
-        />
-      </div>
-      <div>
-        <label className={LABEL_CLASS}>System Prompt (optional)</label>
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={2}
-          className={INPUT_CLASS + ' resize-y'}
-          placeholder="You are a helpful assistant..."
-        />
-      </div>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleTest}
-          disabled={testStatus === 'testing'}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-        >
-          {testStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-          Test Connection
-        </button>
-        {testStatus === 'ok' && (
-          <span className="flex items-center gap-1 text-xs text-green-400">
-            <CheckCircle className="w-3.5 h-3.5" />
-            {testMsg}
-          </span>
-        )}
-        {testStatus === 'error' && (
-          <span className="flex items-center gap-1 text-xs text-red-400">
-            <AlertCircle className="w-3.5 h-3.5" />
-            {testMsg}
-          </span>
-        )}
       </div>
 
-      {/* Hub Integration Files — BOOTSTRAP.md / SOUL.md / HEARTBEAT.md (Paperclip-style) */}
+      {/* ── Shared: Host + Port (not needed for CLI since it's local) ──────── */}
+      {connectionType !== 'cli' && (
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-2">
+            <label className={LABEL_CLASS}>Host</label>
+            <input type="text" value={host} onChange={(e) => setHost(e.target.value)}
+              placeholder="localhost" className={INPUT_CLASS + ' font-mono text-xs'} />
+          </div>
+          <div>
+            <label className={LABEL_CLASS}>Port</label>
+            <input type="number" value={port} onChange={(e) => setPort(e.target.value)}
+              placeholder="18789" className={INPUT_CLASS} />
+          </div>
+        </div>
+      )}
+
+      {/* ── responses + tools-invoke: Gateway Token ──────────────────────── */}
+      {(connectionType === 'responses' || connectionType === 'tools-invoke') && (
+        <>
+          <div>
+            <label className={LABEL_CLASS}>
+              Gateway Token
+              <span className="text-slate-600 font-normal ml-1">(gateway.auth.token)</span>
+            </label>
+            <input type="password" value={gatewayToken} onChange={(e) => setGatewayToken(e.target.value)}
+              placeholder="your-gateway-token" className={INPUT_CLASS} />
+          </div>
+          <div>
+            <label className={LABEL_CLASS}>
+              OpenClaw Agent ID
+              <span className="text-slate-600 font-normal ml-1">(optional, routes to specific agent)</span>
+            </label>
+            <input type="text" value={ocAgentId} onChange={(e) => setOcAgentId(e.target.value)}
+              placeholder="agent-uuid or name" className={INPUT_CLASS + ' font-mono text-xs'} />
+          </div>
+        </>
+      )}
+
+      {/* ── tools-invoke: Tool Name ───────────────────────────────────────── */}
+      {connectionType === 'tools-invoke' && (
+        <div>
+          <label className={LABEL_CLASS}>Tool Name</label>
+          <input type="text" value={toolName} onChange={(e) => setToolName(e.target.value)}
+            placeholder="run" className={INPUT_CLASS + ' font-mono text-xs'} />
+        </div>
+      )}
+
+      {/* ── webhook: path + token ─────────────────────────────────────────── */}
+      {connectionType === 'webhook' && (
+        <>
+          <InfoBox variant="yellow">
+            Requires <code className="bg-white/10 px-1 rounded">hooks.enabled=true</code> and{' '}
+            <code className="bg-white/10 px-1 rounded">hooks.token</code> in OpenClaw config.
+          </InfoBox>
+          <div>
+            <label className={LABEL_CLASS}>Webhook Path</label>
+            <input type="text" value={webhookPath} onChange={(e) => setWebhookPath(e.target.value)}
+              placeholder="/hooks/agenthub" className={INPUT_CLASS + ' font-mono text-xs'} />
+          </div>
+          <div>
+            <label className={LABEL_CLASS}>Webhook Token <span className="text-slate-600 font-normal">(hooks.token)</span></label>
+            <input type="password" value={webhookToken} onChange={(e) => setWebhookToken(e.target.value)}
+              placeholder="your-hooks-token" className={INPUT_CLASS} />
+          </div>
+        </>
+      )}
+
+      {/* ── cli: Agent ID ─────────────────────────────────────────────────── */}
+      {connectionType === 'cli' && (
+        <>
+          <InfoBox variant="yellow">
+            Requires <code className="bg-white/10 px-1 rounded">openclaw</code> CLI installed on the
+            same machine as AgentHub.
+          </InfoBox>
+          <div>
+            <label className={LABEL_CLASS}>OpenClaw Agent ID <span className="text-slate-600 font-normal">(optional)</span></label>
+            <input type="text" value={ocAgentId} onChange={(e) => setOcAgentId(e.target.value)}
+              placeholder="agent-uuid" className={INPUT_CLASS + ' font-mono text-xs'} />
+            <p className="text-[10px] text-slate-600 mt-1">
+              Runs: <code className="font-mono">openclaw agent --agent &lt;id&gt; --prompt "..."</code>
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* ── Model (responses + cli) ───────────────────────────────────────── */}
+      {(connectionType === 'responses' || connectionType === 'cli') && (
+        <div>
+          <label className={LABEL_CLASS}>Model <span className="text-slate-600 font-normal">(optional)</span></label>
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
+            <option value="auto">auto (OpenClaw picks)</option>
+            <option value="gpt">gpt</option>
+            <option value="claude">claude</option>
+            <option value="gemini">gemini</option>
+          </select>
+        </div>
+      )}
+
+      {/* ── System Prompt ─────────────────────────────────────────────────── */}
+      <div>
+        <label className={LABEL_CLASS}>System Prompt <span className="text-slate-600 font-normal">(optional, prepended to task)</span></label>
+        <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
+          rows={2} className={INPUT_CLASS + ' resize-y'}
+          placeholder="You are a helpful assistant..." />
+      </div>
+
+      {/* ── Test Connection (health check) ─────────────────────────────────── */}
+      {connectionType !== 'cli' && (
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={handleTest} disabled={testStatus === 'testing'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50">
+            {testStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+            Test Gateway
+          </button>
+          {testStatus === 'ok'    && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{testMsg}</span>}
+          {testStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{testMsg}</span>}
+        </div>
+      )}
+
+      {/* ── Onboarding Files (BOOTSTRAP / SOUL / HEARTBEAT / Hub Prompt) ─── */}
       <div className="border border-accent-purple/30 rounded-xl p-4 space-y-3 bg-accent-purple/5">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
               <Plug className="w-3.5 h-3.5 text-accent-purple" />
-              Hub Onboarding Files
+              Onboarding Files
             </p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Generate BOOTSTRAP.md (invite prompt), SOUL.md, and HEARTBEAT.md — drop them in your OpenClaw workspace.
+              BOOTSTRAP.md (invite prompt) + SOUL.md + HEARTBEAT.md — drop in your OpenClaw agent workspace.
             </p>
           </div>
           {agentId ? (
-            <div className="flex gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={handleGenerateAll}
-                disabled={soulLoading}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-accent-purple hover:bg-purple-600 text-white rounded-lg transition-colors disabled:opacity-50"
-              >
-                {soulLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                Generate
-              </button>
-              <button
-                type="button"
-                onClick={handleGeneratePrompt}
-                disabled={promptLoading}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {promptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
-                Hub Prompt
-              </button>
-            </div>
+            <button type="button" onClick={handleGenerateDocs} disabled={docsLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple hover:bg-purple-600 text-white rounded-lg transition-colors disabled:opacity-50 shrink-0">
+              {docsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Generate All
+            </button>
           ) : (
             <span className="text-xs text-slate-600 italic">Save agent first</span>
           )}
         </div>
 
         {(bootstrapMd || soulMd || hubPrompt) && (
-          <div className="space-y-3">
-            {/* Tab bar */}
+          <div className="space-y-2">
+            {/* Tabs */}
             <div className="flex gap-1.5 flex-wrap">
-              {bootstrapMd && (
-                <button type="button" onClick={() => setActiveDoc('bootstrap')}
-                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'bootstrap' ? 'border-accent-purple/50 bg-accent-purple/20 text-accent-purple font-semibold' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  📦 BOOTSTRAP.md
-                </button>
-              )}
-              {soulMd && (
-                <button type="button" onClick={() => setActiveDoc('soul')}
-                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'soul' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  🌟 SOUL.md
-                </button>
-              )}
-              {heartbeatMd && (
-                <button type="button" onClick={() => setActiveDoc('heartbeat')}
-                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'heartbeat' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  💓 HEARTBEAT.md
-                </button>
-              )}
-              {hubPrompt && (
-                <button type="button" onClick={() => setActiveDoc('prompt')}
-                  className={`text-xs px-3 py-1 rounded-lg border transition-colors ${activeDoc === 'prompt' ? 'border-accent-purple/50 bg-accent-purple/10 text-accent-purple' : 'border-dark-border text-slate-400 hover:text-slate-200'}`}>
-                  🔌 Hub Prompt
-                </button>
-              )}
+              {[
+                { key: 'bootstrap', label: '📦 BOOTSTRAP.md', hint: 'First-boot invite prompt — agent reads once, then delete' },
+                { key: 'soul',      label: '🌟 SOUL.md',       hint: 'Identity file — loaded every session' },
+                { key: 'heartbeat', label: '💓 HEARTBEAT.md',  hint: 'How AgentHub talks to this agent' },
+                { key: 'prompt',    label: '🔌 Hub Prompt',    hint: 'Paste into OpenClaw system config or SOUL.md' },
+              ].map((tab) => {
+                const hasContent = tab.key === 'soul' ? !!soulMd : tab.key === 'heartbeat' ? !!heartbeatMd : tab.key === 'bootstrap' ? !!bootstrapMd : !!hubPrompt
+                if (!hasContent) return null
+                return (
+                  <button key={tab.key} type="button" title={tab.hint}
+                    onClick={() => setActiveDoc(tab.key as any)}
+                    className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                      activeDoc === tab.key
+                        ? 'border-accent-purple/50 bg-accent-purple/20 text-accent-purple font-semibold'
+                        : 'border-dark-border text-slate-400 hover:text-slate-200'
+                    }`}>
+                    {tab.label}
+                  </button>
+                )
+              })}
             </div>
 
-            {/* Content viewer */}
+            {/* Viewer */}
             <div className="relative">
               <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-52 font-mono whitespace-pre-wrap">
                 {activeContent}
               </pre>
               <div className="absolute top-2 right-2 flex gap-1">
-                <button
-                  type="button"
-                  onClick={() => activeContent && handleCopy(activeContent)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  <Copy className="w-3 h-3" />
-                  {copied ? 'Copied!' : 'Copy'}
+                <button type="button" onClick={() => activeContent && handleCopy(activeContent)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors">
+                  <Copy className="w-3 h-3" />{copied ? 'Copied!' : 'Copy'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => activeContent && handleDownload(activeContent, activeFilename)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  <Download className="w-3 h-3" />
-                  Download
+                <button type="button" onClick={() => activeContent && handleDownload(activeContent, activeFilename)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors">
+                  <Download className="w-3 h-3" />Download
                 </button>
               </div>
             </div>
 
-            {/* Context hint */}
-            <p className="text-xs text-slate-600">
-              {activeDoc === 'bootstrap'
-                ? '📦 Drop BOOTSTRAP.md in ~/.openclaw/agents/<name>/ — agent reads it on first boot, then delete it.'
-                : activeDoc === 'soul'
-                ? '🌟 Drop SOUL.md in ~/.openclaw/agents/<name>/ — loaded at the start of every session.'
-                : activeDoc === 'heartbeat'
-                ? '💓 Drop HEARTBEAT.md in ~/.openclaw/agents/<name>/ — defines how AgentHub calls this agent.'
-                : '🔌 Paste this Hub Prompt into OpenClaw\'s system configuration or SOUL.md.'}
+            <p className="text-[10px] text-slate-600">
+              {activeDoc === 'bootstrap' ? 'Drop in ~/.openclaw/agents/<name>/BOOTSTRAP.md — agent reads on first boot, then rm BOOTSTRAP.md'
+               : activeDoc === 'soul'      ? 'Drop in ~/.openclaw/agents/<name>/SOUL.md — loaded at start of every session'
+               : activeDoc === 'heartbeat' ? 'Drop in ~/.openclaw/agents/<name>/HEARTBEAT.md — protocol for incoming AgentHub calls'
+               : 'Paste into OpenClaw system config or prepend to SOUL.md'}
             </p>
           </div>
         )}
