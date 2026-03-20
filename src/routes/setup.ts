@@ -207,20 +207,27 @@ router.get('/discover-openclaw', async (req: Request, res: Response) => {
 
     const baseURL = `http://${host}:${port}`;
 
-    // Try to hit the OpenAI-compatible models endpoint
-    const response = await axios.get(`${baseURL}/v1/models`, {
+    // Use OpenClaw's real health endpoint: GET /api/health
+    const response = await axios.get(`${baseURL}/api/health`, {
       timeout: 5000,
       validateStatus: () => true,
     });
 
-    if (response.status === 200 && response.data) {
-      const models = response.data?.data || response.data?.models || [];
+    if (response.status === 200) {
+      // Also try to fetch running agents for extra info (best-effort)
+      let agents: any[] = [];
+      try {
+        const ar = await axios.get(`${baseURL}/api/agents`, { timeout: 3000, validateStatus: () => true });
+        if (ar.status === 200) agents = ar.data?.agents || ar.data || [];
+      } catch { /* ignore */ }
+
       res.json({
         connected: true,
         host,
         port,
-        models,
-        version: response.headers['x-openclaw-version'] || null,
+        models: [], // OpenClaw selects model via body param, no /models list
+        version: response.data?.version || response.headers['x-openclaw-version'] || null,
+        agents,
         raw: response.data,
       });
     } else {

@@ -63,7 +63,7 @@ export const AGENT_PRESETS: AgentPreset[] = [
     icon: '🦞',
     category: 'local',
     popular: true,
-    defaultConfig: { host: 'localhost', port: 18789, model: 'openclaw:main' },
+    defaultConfig: { host: 'localhost', port: 18789, model: 'auto' },
     requiredSetup: 'OpenClaw must be running: https://github.com/openclaw/openclaw',
     docsUrl: 'https://docs.openclaw.ai',
   },
@@ -199,7 +199,7 @@ export const AGENT_PRESETS: AgentPreset[] = [
     icon: '🦞',
     category: 'http',
     popular: false,
-    defaultConfig: { host: '192.168.1.x', port: 18789, model: 'openclaw:main', token: '' },
+    defaultConfig: { host: '192.168.1.x', port: 18789, model: 'auto', token: '' },
   },
   {
     id: 'a2a-agent',

@@ -315,38 +315,45 @@ async function executeCursorAgent(config: Record<string, unknown>, input: unknow
 }
 
 // ─── OpenClaw Agent ───────────────────────────────────────────────────────────
+// OpenClaw real API: POST /api/agent/run  { prompt, model? }
+// Response:          { result, success, error?, tokens? }
 
 async function executeOpenClawAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const host = (config.host as string) || 'localhost';
   const port = (config.port as number) || 18789;
-  const model = (config.model as string) || 'openclaw:main';
-  const baseURL = `http://${host}:${port}/v1`;
+  const baseURL = `http://${host}:${port}`;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.token) headers['Authorization'] = `Bearer ${config.token as string}`;
 
-  const messages: { role: string; content: string }[] = [];
-  if (config.systemPrompt) messages.push({ role: 'system', content: config.systemPrompt as string });
-  messages.push({ role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) });
+  // Build the prompt — prepend system prompt if configured
+  const promptText = typeof input === 'string' ? input : JSON.stringify(input);
+  const fullPrompt = config.systemPrompt
+    ? `${config.systemPrompt as string}\n\n${promptText}`
+    : promptText;
+
+  const body: Record<string, unknown> = { prompt: fullPrompt };
+  // model is optional — 'gpt' | 'claude' | 'gemini' | undefined (OpenClaw picks default)
+  if (config.model && config.model !== 'auto') body.model = config.model;
 
   try {
-    const resp = await axios.post(`${baseURL}/chat/completions`, { model, messages }, { headers });
-    const content = resp.data.choices?.[0]?.message?.content || '';
-    const usage = resp.data.usage || {};
+    const resp = await axios.post(`${baseURL}/api/agent/run`, body, { headers, timeout: 120_000 });
+    // OpenClaw returns: { result, success, error?, tokens? }
+    const data = resp.data as { result?: string; output?: string; success?: boolean; error?: string; tokens?: number };
+    const content = data.result ?? data.output ?? JSON.stringify(data);
     return {
-      success: true,
+      success: data.success !== false,
       output: content,
-      tokensUsed: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+      tokensUsed: data.tokens ?? 0,
       costUsd: 0,
     };
   } catch (err: any) {
-    return {
-      success: false,
-      output: null,
-      tokensUsed: 0,
-      costUsd: 0,
-      error: err.response?.data?.error?.message || err.message,
-    };
+    const msg =
+      err.response?.data?.error ??
+      err.response?.data?.message ??
+      err.message ??
+      'OpenClaw unreachable';
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: msg };
   }
 }
 

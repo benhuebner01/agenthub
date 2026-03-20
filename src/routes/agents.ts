@@ -430,52 +430,54 @@ router.get('/:id/hub-prompt', async (req: Request, res: Response) => {
     const hubPort = process.env.PORT || '3001';
     const hubBase = `http://${hubHost}:${hubPort}/api`;
 
-    const prompt = `## AgentHub Connection
+    const prompt = `## AgentHub — Systemkontext für ${agent.name}
 
-You are **${agent.name}**, a ${agent.role || 'worker'} agent connected to AgentHub.
-${agent.jobDescription ? `\nYour job: ${agent.jobDescription}` : ''}
-${agent.description ? `Your description: ${agent.description}` : ''}
+Du bist **${agent.name}**, ein ${agent.role || 'worker'}-Agent, der mit AgentHub verbunden ist.
+${agent.jobDescription ? `\nDeine Aufgabe: ${agent.jobDescription}` : ''}
+${agent.description ? `\nBeschreibung: ${agent.description}` : ''}
 
-## Hub
-- Base URL: ${hubBase}
-- Your Agent ID: \`${agent.id}\`
-- API Key header: \`X-API-Key: <your-agenthub-api-key>\`
+## Deine Verbindungsdaten
+- Hub-URL: ${hubBase}
+- Deine Agent-ID: \`${agent.id}\`
 
-## Receiving Tasks
-AgentHub will send you tasks via the OpenAI-compatible chat completions endpoint.
-The task is always in the last \`user\` message.
-Any \`system\` message may contain additional context about the current task (runId, organization, goals).
-
-## Reporting Results
-When you complete a task, POST your result back:
+## Wie AgentHub dich anspricht (für OpenClaw)
+AgentHub sendet dir Aufgaben direkt über die OpenClaw-API:
 
 \`\`\`
-POST ${hubBase}/agents/${agent.id}/push-result
-X-API-Key: <your-agenthub-api-key>
+POST http://localhost:18789/api/agent/run
 Content-Type: application/json
 
 {
-  "output": "<your completed result>",
-  "runId": "<optional: from task context>",
+  "prompt": "<dein systemkontext + aufgabe>",
+  "model": "gpt"
+}
+\`\`\`
+
+Das \`prompt\`-Feld enthält deinen vollständigen Kontext (wer du bist, was deine Aufgabe ist)
+sowie die aktuelle Aufgabenbeschreibung. Führe die Aufgabe aus und gib das Ergebnis zurück.
+
+## Ergebnis zurückmelden (optional)
+Wenn deine Aufgabe eine runId enthält, melde das Ergebnis zurück:
+
+\`\`\`
+POST ${hubBase}/agents/${agent.id}/push-result
+Content-Type: application/json
+
+{
+  "output": "<dein ergebnis>",
+  "runId": "<run-id aus dem kontext>",
   "success": true
 }
 \`\`\`
 
-## Polling for Tasks (optional)
-You can also poll for pending tasks:
+## Verhaltensregeln
+- Bleib fokussiert auf deine Rolle und Aufgabenbeschreibung.
+- Fasse nach jeder erledigten Aufgabe zusammen, was du getan hast.
+- Wenn du delegieren musst, erwähne den Agentennamen klar.
+- Halte Antworten präzise und strukturiert.
 
-\`\`\`
-GET ${hubBase}/agents/${agent.id}/next-task
-X-API-Key: <your-agenthub-api-key>
-\`\`\`
-
-Returns \`{ "task": null }\` if no tasks pending, or \`{ "task": { "runId": "...", "input": "..." } }\`.
-
-## Behavior
-- Stay focused on your role and job description.
-- Always summarize what you did after completing a task.
-- If a task references other agents, mention the agent name so the hub can route.
-- Keep responses structured and concise.`;
+---
+*Diesen Text in OpenClaw's SOUL.md oder Systemkonfiguration einfügen.*`;
 
     res.json({ data: { agentId: agent.id, agentName: agent.name, prompt } });
   } catch (err: any) {
@@ -690,71 +692,76 @@ router.get('/:id/soul-md', async (req: Request, res: Response) => {
     const hubPort = process.env.PORT || 3001;
     const hubHost = process.env.HUB_HOST || 'localhost';
 
+    const ocModel = (config.model as string) && config.model !== 'auto' ? config.model : undefined;
+
     const soulMd = `# ${agent.name} — SOUL.md
 
-## Identity
-You are **${agent.name}**, a ${agent.role || 'worker'} agent.
-${agent.jobDescription ? `\nYour job: ${agent.jobDescription}` : ''}
-${agent.description ? `\nAbout you: ${agent.description}` : ''}
+## Identität
+Du bist **${agent.name}**, ein ${agent.role || 'worker'}-Agent.
+${agent.jobDescription ? `\nDeine Aufgabe: ${agent.jobDescription}` : ''}
+${agent.description ? `\nÜber dich: ${agent.description}` : ''}
 
-## Hub Connection — AgentHub
-Your orchestration hub runs at: **http://${hubHost}:${hubPort}**
-Your Agent ID: \`${agent.id}\`
+## AgentHub Verbindung
+Dein Orchestrations-Hub läuft unter: **http://${hubHost}:${hubPort}**
+Deine Agent-ID: \`${agent.id}\`
 
-### Receiving tasks (heartbeat)
-AgentHub will send you tasks via your OpenAI-compatible API at:
-  POST http://${host}:${port}/v1/chat/completions
+### Wie AgentHub dich anspricht
+AgentHub sendet Aufgaben an dich via:
+  POST http://${host}:${port}/api/agent/run
+  Body: { "prompt": "<deine Aufgabe>", "model": "${ocModel || 'auto'}" }
 
-Tasks arrive as chat messages. The last user message is your task.
+Das Feld \`prompt\` enthält deinen Systemkontext + die eigentliche Aufgabe.
 
-### Reporting results back
-After completing a task, if you received a runId in your context, call:
-  POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/heartbeat-result
-  Headers: X-API-Key: <your-agenthub-api-key>
-  Body: { "output": "your result", "runId": "the-run-id", "success": true }
+### Ergebnis zurückmelden
+Wenn deine Aufgabe eine runId enthält, sende das Ergebnis zurück:
+  POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result
+  Content-Type: application/json
+  Body: { "output": "dein Ergebnis", "runId": "die-run-id", "success": true }
 
-### Fetching your current tasks
-  GET http://${hubHost}:${hubPort}/api/agents/${agent.id}
-  Headers: X-API-Key: <your-agenthub-api-key>
+### Pending Tasks abfragen (optional)
+  GET http://${hubHost}:${hubPort}/api/agents/${agent.id}/next-task
 
-## Behavior Guidelines
-- You are part of a larger AI organization. Stay focused on your role.
-- When you complete a task, always summarize what you did.
-- If you need to delegate, mention it clearly so the hub can route it.
-- Keep responses concise and structured.
+## Verhaltensregeln
+- Du bist Teil einer größeren KI-Organisation. Bleib fokussiert auf deine Rolle.
+- Wenn du eine Aufgabe abschließt, fasse immer zusammen, was du getan hast.
+- Wenn du delegieren musst, erwähne es klar, damit der Hub es weiterleiten kann.
+- Halte Antworten präzise und strukturiert.
 `;
 
     const heartbeatMd = `# ${agent.name} — HEARTBEAT.md
 
-## Heartbeat Protocol
-AgentHub sends you a heartbeat to trigger work. Here is what to expect:
+## Heartbeat-Protokoll
+AgentHub ruft deinen Endpunkt direkt auf, um dir Arbeit zu geben.
 
-### Incoming heartbeat format
-\`\`\`json
+### Eingehende Anfrage (wie AgentHub dich anruft)
+\`\`\`
+POST http://${host}:${port}/api/agent/run
+Content-Type: application/json
+
 {
-  "model": "${(config.model as string) || 'openclaw:main'}",
-  "messages": [
-    { "role": "system", "content": "<your soul + current task context>" },
-    { "role": "user", "content": "<task description or 'heartbeat'>" }
-  ]
+  "prompt": "<systemkontext>\\n\\n<aufgabenbeschreibung>",
+  "model": "${ocModel || 'auto'}"
 }
 \`\`\`
 
-### What to do on heartbeat
-1. Read the user message — it contains your task
-2. Execute the task using your tools and capabilities
-3. Return your result as the assistant message content
-4. If runId is present in the context, call the hub result endpoint
+### Was du tun sollst
+1. Lies das \`prompt\`-Feld — es enthält deinen Kontext und die Aufgabe
+2. Führe die Aufgabe mit deinen Tools und Fähigkeiten aus
+3. Sende dein Ergebnis zurück an den Hub (wenn runId vorhanden):
 
-### Result endpoint
-POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/heartbeat-result
-\`\`\`json
+\`\`\`
+POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result
+Content-Type: application/json
+
 {
-  "output": "Task completed: ...",
-  "runId": "optional-run-id",
+  "output": "Aufgabe erledigt: ...",
+  "runId": "optionale-run-id",
   "success": true
 }
 \`\`\`
+
+### Health Check
+GET http://${host}:${port}/api/health  → sollte 200 OK zurückgeben
 `;
 
     res.json({

@@ -1167,7 +1167,7 @@ function OpenClawConfig({
 }) {
   const [host, setHost] = useState((config.host as string) || 'localhost')
   const [port, setPort] = useState(String((config.port as number) || 18789))
-  const [model, setModel] = useState((config.model as string) || 'openclaw:main')
+  const [model, setModel] = useState((config.model as string) || 'auto')
   const [token, setToken] = useState((config.token as string) || '')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
@@ -1244,15 +1244,8 @@ function OpenClawConfig({
   return (
     <div className="space-y-3">
       <InfoBox>
-        OpenClaw listens on port 18789 with an OpenAI-compatible API.{' '}
-        <a
-          href="https://docs.openclaw.ai"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:opacity-80"
-        >
-          docs.openclaw.ai
-        </a>
+        OpenClaw läuft lokal auf Port 18789. API: <code className="bg-white/10 px-1 rounded text-xs">POST /api/agent/run</code> — kein OpenAI-Format.{' '}
+        Endpoint: <code className="bg-white/10 px-1 rounded text-xs">http://localhost:18789/api/agent/run</code>
       </InfoBox>
       <div className="grid grid-cols-3 gap-2">
         <div className="col-span-2">
@@ -1277,14 +1270,17 @@ function OpenClawConfig({
         </div>
       </div>
       <div>
-        <label className={LABEL_CLASS}>Model ID</label>
-        <input
-          type="text"
+        <label className={LABEL_CLASS}>Modell (optional)</label>
+        <select
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          placeholder="openclaw:main"
-          className={INPUT_CLASS + ' font-mono text-xs'}
-        />
+          className={INPUT_CLASS}
+        >
+          <option value="auto">auto (OpenClaw wählt)</option>
+          <option value="gpt">gpt</option>
+          <option value="claude">claude</option>
+          <option value="gemini">gemini</option>
+        </select>
       </div>
       <div>
         <label className={LABEL_CLASS}>Bearer Token (optional)</label>
