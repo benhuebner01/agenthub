@@ -1,12 +1,20 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import { KeyRound, Check } from 'lucide-react'
+
+// Apply saved text size on layout mount
+const TEXT_SIZE_SCALES: Record<string, string> = { xs: '0.85', sm: '0.925', md: '1', lg: '1.1', xl: '1.2' }
 
 interface LayoutProps {
   children: React.ReactNode
 }
 
 export default function Layout({ children }: LayoutProps) {
+  useEffect(() => {
+    const saved = localStorage.getItem('agenthub-text-size') || 'md'
+    const scale = TEXT_SIZE_SCALES[saved] || '1'
+    document.documentElement.style.fontSize = `${parseFloat(scale) * 16}px`
+  }, [])
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [keyValue, setKeyValue] = useState(
     () => localStorage.getItem('agenthub_api_key') ?? ''

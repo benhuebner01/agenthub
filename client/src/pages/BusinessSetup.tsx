@@ -10,6 +10,9 @@ import {
   CheckCircle,
   Loader2,
   ArrowLeft,
+  Users,
+  User,
+  GitBranch,
 } from 'lucide-react'
 import { analyzeBusiness, createBusiness, BusinessAnalysisInput, AgentType, AgentRole } from '../api/client'
 import { useToast } from '../components/Toaster'
@@ -41,7 +44,10 @@ const ROLE_BADGE: Record<string, string> = {
   specialist: 'bg-green-500/20 text-green-300',
 }
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5
+const REAL_AGENT_TYPES: AgentType[] = ['claude-code', 'openclaw']
+const isRealAgent = (type: AgentType) => REAL_AGENT_TYPES.includes(type) || type === 'openai' || type === 'claude'
+
+type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
 
 interface AnalysisResult {
   organization: { name: string; description: string; industry: string; goals: string[] }
@@ -78,6 +84,11 @@ export default function BusinessSetup() {
   const [editableCeo, setEditableCeo] = useState<AnalysisResult['ceoAgent'] | null>(null)
   const [editableTeam, setEditableTeam] = useState<AnalysisResult['proposedTeam']>([])
 
+  // Organization mapping state (step 4)
+  const [orgMode, setOrgMode] = useState<'full-team' | 'one-agent'>('full-team')
+  const [maxRealAgents, setMaxRealAgents] = useState<number | null>(null)
+  const [subagentMap, setSubagentMap] = useState<Record<number, number[]>>({})
+
   // Progress steps
   const [creationProgress, setCreationProgress] = useState<string[]>([])
 
@@ -87,7 +98,7 @@ export default function BusinessSetup() {
       setAnalysisResult(data.data)
       setEditableCeo(data.data.ceoAgent)
       setEditableTeam(data.data.proposedTeam || [])
-      setStep(2)
+      setStep(3)
     },
     onError: (err: Error) => {
       toast.error(`Analysis failed: ${err.message}`)
@@ -98,18 +109,38 @@ export default function BusinessSetup() {
   const createMutation = useMutation({
     mutationFn: () => {
       if (!analysisResult || !editableCeo) throw new Error('No analysis data')
+      let finalTeam = editableTeam
+      if (orgMode === 'one-agent') {
+        const realAgents = editableTeam.filter((a) => isRealAgent(a.type))
+        const internalAgents = editableTeam.filter((a) => a.type === 'internal')
+        finalTeam = realAgents.length > 0 ? [realAgents[0], ...internalAgents] : internalAgents
+      }
+      if (maxRealAgents !== null) {
+        let realCount = 0
+        finalTeam = finalTeam.filter((a) => {
+          if (isRealAgent(a.type)) {
+            realCount++
+            return realCount <= maxRealAgents
+          }
+          return true
+        })
+      }
       return createBusiness({
-        organizationData: analysisResult.organization,
+        organizationData: {
+          ...analysisResult.organization,
+          orgMode,
+          maxRealAgents,
+        } as typeof analysisResult.organization,
         ceoConfig: editableCeo,
-        teamConfigs: editableTeam,
+        teamConfigs: finalTeam,
       })
     },
     onSuccess: () => {
-      setStep(5)
+      setStep(7)
     },
     onError: (err: Error) => {
       toast.error(`Creation failed: ${err.message}`)
-      setStep(3)
+      setStep(5)
     },
   })
 
@@ -129,9 +160,8 @@ export default function BusinessSetup() {
   }
 
   const handleCreate = async () => {
-    setStep(4)
+    setStep(6)
     setCreationProgress(['Creating CEO agent...'])
-    // Simulate progress steps with delays
     setTimeout(() => setCreationProgress((p) => [...p, 'Creating team agents...']), 800)
     setTimeout(() => setCreationProgress((p) => [...p, 'Setting up hierarchy...']), 1600)
     createMutation.mutate()
@@ -141,8 +171,13 @@ export default function BusinessSetup() {
   const removeGoal = (i: number) => setGoals((g) => g.filter((_, idx) => idx !== i))
   const updateGoal = (i: number, val: string) => setGoals((g) => g.map((x, idx) => idx === i ? val : x))
 
+  // Helper: get real agents from editable team
+  const getRealAgents = () => editableTeam.filter((a) => isRealAgent(a.type))
+  const getInternalAgents = () => editableTeam.filter((a) => a.type === 'internal')
+
   // ─── Steps ───────────────────────────────────────────────────────────────────
 
+  // Step 0: Intro
   if (step === 0) {
     return (
       <div className="max-w-2xl mx-auto">
@@ -181,6 +216,7 @@ export default function BusinessSetup() {
     )
   }
 
+  // Step 1: Describe business
   if (step === 1) {
     return (
       <div className="max-w-2xl mx-auto space-y-6">
@@ -278,31 +314,33 @@ export default function BusinessSetup() {
     )
   }
 
+  // Step 2: Analyzing (spinner)
   if (step === 2) {
-    if (analyzeMutation.isPending) {
-      return (
-        <div className="max-w-2xl mx-auto">
-          <div className="flex flex-col items-center justify-center py-20 space-y-6">
-            <div className="w-16 h-16 bg-accent-purple/20 rounded-2xl flex items-center justify-center border border-accent-purple/30 animate-pulse">
-              <Sparkles className="w-8 h-8 text-accent-purple" />
-            </div>
-            <div className="text-center">
-              <h2 className="text-xl font-bold text-white mb-2">Analyzing your business...</h2>
-              <p className="text-slate-400 text-sm">AI is designing your optimal team structure</p>
-            </div>
-            <div className="flex flex-col items-center gap-2 text-sm text-slate-500">
-              {['Analyzing business model', 'Designing org structure', 'Selecting agent types', 'Calculating costs'].map((step, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  {step}
-                </div>
-              ))}
-            </div>
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="flex flex-col items-center justify-center py-20 space-y-6">
+          <div className="w-16 h-16 bg-accent-purple/20 rounded-2xl flex items-center justify-center border border-accent-purple/30 animate-pulse">
+            <Sparkles className="w-8 h-8 text-accent-purple" />
+          </div>
+          <div className="text-center">
+            <h2 className="text-xl font-bold text-white mb-2">Analyzing your business...</h2>
+            <p className="text-slate-400 text-sm">AI is designing your optimal team structure</p>
+          </div>
+          <div className="flex flex-col items-center gap-2 text-sm text-slate-500">
+            {['Analyzing business model', 'Designing org structure', 'Selecting agent types', 'Calculating costs'].map((s, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                {s}
+              </div>
+            ))}
           </div>
         </div>
-      )
-    }
+      </div>
+    )
+  }
 
+  // Step 3: Review AI analysis result
+  if (step === 3) {
     if (!analysisResult) return null
 
     return (
@@ -387,6 +425,322 @@ export default function BusinessSetup() {
 
         <div className="flex gap-3">
           <button
+            onClick={() => setStep(4)}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-accent-purple hover:bg-purple-600 text-white font-semibold rounded-xl transition-colors"
+          >
+            <GitBranch className="w-5 h-5" />
+            Configure Organization
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Step 4: Organization Mapping
+  if (step === 4) {
+    const realAgents = getRealAgents()
+    const internalAgents = getInternalAgents()
+    const realAgentCount = realAgents.length
+
+    const toggleSubagent = (realIdx: number, internalIdx: number) => {
+      setSubagentMap((prev) => {
+        const current = prev[realIdx] || []
+        if (current.includes(internalIdx)) {
+          return { ...prev, [realIdx]: current.filter((x) => x !== internalIdx) }
+        }
+        return { ...prev, [realIdx]: [...current, internalIdx] }
+      })
+    }
+
+    const addNewAgent = () => {
+      setEditableTeam((t) => [
+        ...t,
+        {
+          name: 'New Agent',
+          role: 'worker' as AgentRole,
+          description: '',
+          type: 'internal' as AgentType,
+          config: {},
+          jobDescription: '',
+          reportsTo: editableCeo?.name || 'CEO',
+        },
+      ])
+    }
+
+    const removeAgent = (i: number) => {
+      setEditableTeam((t) => t.filter((_, idx) => idx !== i))
+      // Clean up subagent map references
+      setSubagentMap((prev) => {
+        const next: Record<number, number[]> = {}
+        for (const [k, v] of Object.entries(prev)) {
+          next[Number(k)] = v.filter((x) => x !== i).map((x) => (x > i ? x - 1 : x))
+        }
+        return next
+      })
+    }
+
+    // In one-agent mode, show only the first real agent + internal agents
+    const displayAgents = orgMode === 'one-agent'
+      ? editableTeam.filter((a, _i) => {
+          if (a.type === 'internal') return true
+          if (isRealAgent(a.type)) {
+            // Only keep the first real agent
+            const firstRealIdx = editableTeam.findIndex((x) => isRealAgent(x.type))
+            return editableTeam.indexOf(a) === firstRealIdx
+          }
+          return false
+        })
+      : editableTeam
+
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setStep(3)} className="text-slate-400 hover:text-slate-200">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-white">Organization Mapping</h1>
+            <p className="text-sm text-slate-400">Configure your organization mode and agent hierarchy</p>
+          </div>
+        </div>
+
+        {/* Mode Selection */}
+        <div>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">Organization Mode</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              onClick={() => setOrgMode('full-team')}
+              className={`rounded-xl border-2 p-5 text-left transition-colors ${
+                orgMode === 'full-team'
+                  ? 'border-accent-purple bg-accent-purple/10'
+                  : 'border-dark-border bg-dark-card hover:border-slate-600'
+              }`}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <Users className={`w-6 h-6 ${orgMode === 'full-team' ? 'text-accent-purple' : 'text-slate-400'}`} />
+                <span className={`text-sm font-semibold ${orgMode === 'full-team' ? 'text-white' : 'text-slate-200'}`}>
+                  Full Team
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Multiple real coding agents plus internal agents. Each agent works independently with its own capabilities.
+              </p>
+            </button>
+            <button
+              onClick={() => setOrgMode('one-agent')}
+              className={`rounded-xl border-2 p-5 text-left transition-colors ${
+                orgMode === 'one-agent'
+                  ? 'border-accent-purple bg-accent-purple/10'
+                  : 'border-dark-border bg-dark-card hover:border-slate-600'
+              }`}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <User className={`w-6 h-6 ${orgMode === 'one-agent' ? 'text-accent-purple' : 'text-slate-400'}`} />
+                <span className={`text-sm font-semibold ${orgMode === 'one-agent' ? 'text-white' : 'text-slate-200'}`}>
+                  One Agent Company
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                A single real coding agent with internal agents and sub-agents dedicated to it. Simpler and more focused.
+              </p>
+            </button>
+          </div>
+        </div>
+
+        {/* Max Real Agents */}
+        {orgMode === 'full-team' && (
+          <div className="bg-dark-card border border-dark-border rounded-xl p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-200">Max Real Agents</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Limit the number of coding agents (claude-code, openai, openclaw, cursor). Internal agents are not counted.
+                </p>
+              </div>
+              <input
+                type="number"
+                min={1}
+                value={maxRealAgents ?? ''}
+                onChange={(e) => setMaxRealAgents(e.target.value ? Number(e.target.value) : null)}
+                placeholder="No limit"
+                className="w-28 px-3 py-2 bg-dark-bg border border-dark-border rounded-xl text-slate-200 text-sm text-center focus:outline-none focus:border-accent-purple/50"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Agent Hierarchy */}
+        <div>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">Agent Hierarchy</p>
+
+          {/* CEO at top */}
+          {editableCeo && (
+            <div className={`rounded-xl border-2 p-4 mb-4 ${ROLE_COLORS.ceo}`}>
+              <div className="flex items-center gap-3">
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${ROLE_BADGE.ceo}`}>CEO</span>
+                <span className="text-sm font-bold text-white">{editableCeo.name}</span>
+                <span className="text-xs text-slate-500 font-mono ml-auto">{editableCeo.type}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Team agents tree */}
+          <div className="space-y-3 ml-6 border-l-2 border-dark-border pl-4">
+            {displayAgents.map((agent, displayIdx) => {
+              const actualIdx = editableTeam.indexOf(agent)
+              const isReal = isRealAgent(agent.type)
+              const assignedSubagents = subagentMap[actualIdx] || []
+
+              return (
+                <div key={actualIdx} className={`rounded-xl border p-4 ${ROLE_COLORS[agent.role] || ROLE_COLORS.worker}`}>
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${ROLE_BADGE[agent.role] || ROLE_BADGE.worker}`}>
+                        {agent.role}
+                      </span>
+                      {isReal && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-medium">
+                          coding
+                        </span>
+                      )}
+                      {agent.type === 'internal' && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 font-medium">
+                          internal
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeAgent(actualIdx)}
+                      className="text-slate-500 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-2">
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">Name</label>
+                      <input
+                        value={agent.name}
+                        onChange={(e) =>
+                          setEditableTeam((t) => t.map((a, idx) => idx === actualIdx ? { ...a, name: e.target.value } : a))
+                        }
+                        className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">Type</label>
+                      <select
+                        value={agent.type}
+                        onChange={(e) =>
+                          setEditableTeam((t) => t.map((a, idx) => idx === actualIdx ? { ...a, type: e.target.value as AgentType } : a))
+                        }
+                        className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                      >
+                        {['claude', 'openai', 'http', 'bash', 'internal', 'openclaw', 'claude-code', 'a2a', 'mcp'].map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">Role</label>
+                      <select
+                        value={agent.role}
+                        onChange={(e) =>
+                          setEditableTeam((t) => t.map((a, idx) => idx === actualIdx ? { ...a, role: e.target.value as AgentRole } : a))
+                        }
+                        className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                      >
+                        {['ceo', 'manager', 'worker', 'specialist'].map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">Reports To</label>
+                      <input
+                        value={agent.reportsTo}
+                        onChange={(e) =>
+                          setEditableTeam((t) => t.map((a, idx) => idx === actualIdx ? { ...a, reportsTo: e.target.value } : a))
+                        }
+                        className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Sub-agent assignment for real agents */}
+                  {isReal && internalAgents.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-dark-border">
+                      <p className="text-xs text-slate-400 mb-2 flex items-center gap-1">
+                        <GitBranch className="w-3 h-3" />
+                        Dedicated sub-agents (internal)
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {internalAgents.map((ia) => {
+                          const iaIdx = editableTeam.indexOf(ia)
+                          const isAssigned = assignedSubagents.includes(iaIdx)
+                          return (
+                            <button
+                              key={iaIdx}
+                              onClick={() => toggleSubagent(actualIdx, iaIdx)}
+                              className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                                isAssigned
+                                  ? 'border-accent-purple bg-accent-purple/20 text-purple-300'
+                                  : 'border-dark-border bg-dark-bg text-slate-400 hover:border-slate-500'
+                              }`}
+                            >
+                              {ia.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Add agent button */}
+          <button
+            onClick={addNewAgent}
+            className="mt-3 ml-6 flex items-center gap-2 text-sm text-slate-400 hover:text-accent-purple transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add agent
+          </button>
+        </div>
+
+        {/* Summary */}
+        <div className="bg-dark-card border border-dark-border rounded-xl p-4">
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-4">
+              <span className="text-slate-400">
+                Mode: <span className="text-slate-200 font-medium">{orgMode === 'full-team' ? 'Full Team' : 'One Agent Company'}</span>
+              </span>
+              <span className="text-slate-400">
+                Real agents: <span className="text-slate-200 font-medium">{orgMode === 'one-agent' ? 1 : realAgentCount}</span>
+                {maxRealAgents !== null && orgMode === 'full-team' && (
+                  <span className="text-slate-500"> / {maxRealAgents} max</span>
+                )}
+              </span>
+              <span className="text-slate-400">
+                Internal: <span className="text-slate-200 font-medium">{internalAgents.length}</span>
+              </span>
+            </div>
+            <span className="text-sm font-semibold text-green-400">
+              Total: {1 + displayAgents.length} agents
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <button
             onClick={handleCreate}
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-accent-purple hover:bg-purple-600 text-white font-semibold rounded-xl transition-colors"
           >
@@ -394,7 +748,7 @@ export default function BusinessSetup() {
             Create Organization
           </button>
           <button
-            onClick={() => setStep(3)}
+            onClick={() => setStep(5)}
             className="px-6 py-3.5 bg-white/5 hover:bg-white/10 text-slate-300 font-medium rounded-xl border border-dark-border transition-colors"
           >
             Customize
@@ -404,11 +758,12 @@ export default function BusinessSetup() {
     )
   }
 
-  if (step === 3) {
+  // Step 5: Customize team (fine-tuning)
+  if (step === 5) {
     return (
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => setStep(2)} className="text-slate-400 hover:text-slate-200">
+          <button onClick={() => setStep(4)} className="text-slate-400 hover:text-slate-200">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
@@ -510,7 +865,8 @@ export default function BusinessSetup() {
     )
   }
 
-  if (step === 4) {
+  // Step 6: Creating
+  if (step === 6) {
     return (
       <div className="max-w-2xl mx-auto">
         <div className="flex flex-col items-center justify-center py-20 space-y-6">
@@ -540,7 +896,7 @@ export default function BusinessSetup() {
     )
   }
 
-  // Step 5: Done
+  // Step 7: Done
   return (
     <div className="max-w-2xl mx-auto">
       <div className="flex flex-col items-center justify-center py-20 space-y-6 text-center">

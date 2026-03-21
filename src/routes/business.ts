@@ -204,6 +204,12 @@ router.post('/create', async (req: Request, res: Response) => {
       }
     }
 
+    // ── Auto-generate org memory via AI (async, non-blocking) ──
+    const allTeamNames = teamAgents.map((a: any) => `${a.name} (${a.role})`).join(', ');
+    generateOrgMemory(orgId, organizationData, ceoAgent, allTeamNames).catch((e: any) =>
+      console.error('[Business] Auto-generate org memory failed (non-critical):', e.message)
+    );
+
     res.status(201).json({
       data: {
         organization: org,
@@ -216,6 +222,58 @@ router.post('/create', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to create business', details: err.message });
   }
 });
+
+// ─── Auto-generate Org Memory ─────────────────────────────────────────────────
+
+async function generateOrgMemory(orgId: string, orgData: any, ceo: any, teamNames: string) {
+  try {
+    const prompt = `You are setting up the organizational memory for a new AI company called "${orgData.name}".
+Industry: ${orgData.industry || 'General'}
+Description: ${orgData.description || 'N/A'}
+Goals: ${Array.isArray(orgData.goals) ? orgData.goals.join(', ') : 'Not specified'}
+CEO: ${ceo.name}
+Team: ${teamNames || 'No team yet'}
+
+Generate 5-8 essential shared memory entries that ALL agents in this organization should know.
+Output ONLY a JSON array of objects with "key" and "value" fields. Keys should be snake_case identifiers.
+
+Example entries to consider:
+- company_mission: the core mission statement
+- brand_voice: how the company communicates
+- target_audience: who the company serves
+- key_products: main products/services
+- communication_style: formal/casual/etc
+- quality_standards: what quality means for this company
+- escalation_rules: when to escalate issues to management
+
+Output ONLY valid JSON array, no markdown, no explanation.`;
+
+    const result = await callAI('You are a business setup assistant. Output only valid JSON.', prompt);
+
+    // Parse the JSON array
+    const cleaned = result.replace(/```json?\s*/g, '').replace(/```/g, '').trim();
+    const entries = JSON.parse(cleaned);
+    const now = new Date().toISOString();
+
+    if (Array.isArray(entries)) {
+      for (const entry of entries) {
+        if (entry.key && entry.value) {
+          await db.insert(sharedMemory).values({
+            id: uuidv4(),
+            organizationId: orgId,
+            key: String(entry.key).trim(),
+            value: String(entry.value).trim(),
+            createdByAgentId: ceo.id,
+            updatedAt: now,
+          }).onConflictDoNothing();
+        }
+      }
+      console.log(`[Business] Auto-generated ${entries.length} org memory entries for ${orgData.name}`);
+    }
+  } catch (e: any) {
+    console.error('[Business] generateOrgMemory error:', e.message);
+  }
+}
 
 // ─── GET /api/business/organizations ─────────────────────────────────────────
 
@@ -358,13 +416,28 @@ For restructuring or strategy proposals:
 {"type": "strategy", "title": "Improve Content Pipeline", "reasoning": "Current output is too slow", "details": {}, "estimatedMonthlyCostUsd": 0}
 </proposal>
 
+You can also generate or update system prompts for your team agents. When you want to set a system prompt for an agent, output:
+<system_prompt agent_name="AgentName">
+The system prompt content here...
+</system_prompt>
+
 Analyze the situation and respond to: ${userInput || 'Please analyze our current organizational performance and recommend improvements.'}`;
+
+    // Check if this is the first CEO run (no previous runs for this CEO)
+    const ceoRunCount = orgRuns.filter((r) => r.agentId === ceoAgent.id).length;
+    const isFirstRun = ceoRunCount === 0;
+
+    // On first run, ask CEO to also generate system prompts for all agents
+    let actualInput = userInput || 'Analyze organizational performance and recommend improvements.';
+    if (isFirstRun && teamAgents.length > 0) {
+      actualInput += '\n\nIMPORTANT: This is your first run. Please also generate appropriate system prompts for each team member using <system_prompt agent_name="..."> blocks. Each system prompt should define the agent\'s personality, capabilities, and behavioral guidelines aligned with our organization\'s mission and goals.';
+    }
 
     // Use callAI directly — works with any available API key (Anthropic or OpenAI),
     // independent of the CEO agent's stored type so there's no SDK mismatch error.
     const ceoOutput = await callAI(
       ceoSystemPrompt,
-      userInput || 'Analyze organizational performance and recommend improvements.',
+      actualInput,
     );
 
     // Parse any <proposal> blocks the CEO produced and save them
@@ -390,7 +463,24 @@ Analyze the situation and respond to: ${userInput || 'Please analyze our current
       }
     }
 
-    res.json({ data: { success: true, output: ceoOutput, tokensUsed: 0, costUsd: 0 } });
+    // Parse any <system_prompt> blocks and update agent configs
+    const sysPromptRegex = /<system_prompt\s+agent_name="([^"]+)">([\s\S]*?)<\/system_prompt>/g;
+    let sysMatch;
+    let promptsUpdated = 0;
+    while ((sysMatch = sysPromptRegex.exec(ceoOutput)) !== null) {
+      const agentName = sysMatch[1].trim();
+      const sysPromptContent = sysMatch[2].trim();
+      const targetAgent = orgAgents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
+      if (targetAgent) {
+        const updatedConfig = { ...(targetAgent.config as Record<string, unknown>), systemPrompt: sysPromptContent };
+        await db.update(agents)
+          .set({ config: updatedConfig, updatedAt: new Date().toISOString() })
+          .where(eq(agents.id, targetAgent.id));
+        promptsUpdated++;
+      }
+    }
+
+    res.json({ data: { success: true, output: ceoOutput, tokensUsed: 0, costUsd: 0, promptsUpdated } });
   } catch (err: any) {
     console.error('[Business] POST /organizations/:id/ceo-run error:', err);
     res.status(500).json({ error: 'Failed to run CEO agent', details: err.message });

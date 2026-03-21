@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Settings,
@@ -494,6 +494,59 @@ function ApiKeysSection() {
 
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 
+// ─── Appearance Section ──────────────────────────────────────────────────────
+
+const TEXT_SIZES = [
+  { value: 'xs', label: 'Extra Small', scale: '0.85' },
+  { value: 'sm', label: 'Small', scale: '0.925' },
+  { value: 'md', label: 'Medium (Default)', scale: '1' },
+  { value: 'lg', label: 'Large', scale: '1.1' },
+  { value: 'xl', label: 'Extra Large', scale: '1.2' },
+]
+
+function AppearanceSection() {
+  const [textSize, setTextSize] = useState(() => localStorage.getItem('agenthub-text-size') || 'md')
+
+  useEffect(() => {
+    localStorage.setItem('agenthub-text-size', textSize)
+    const scale = TEXT_SIZES.find((s) => s.value === textSize)?.scale || '1'
+    document.documentElement.style.fontSize = `${parseFloat(scale) * 16}px`
+  }, [textSize])
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-slate-300 mb-3">Text Size</label>
+        <div className="grid grid-cols-5 gap-2">
+          {TEXT_SIZES.map((size) => (
+            <button
+              key={size.value}
+              onClick={() => setTextSize(size.value)}
+              className={`px-3 py-2.5 rounded-lg border text-center transition-colors ${
+                textSize === size.value
+                  ? 'border-accent-purple/60 bg-accent-purple/10 text-slate-200'
+                  : 'border-dark-border text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <p className="text-xs font-semibold">{size.label}</p>
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          Changes the base font size of the entire control panel. Takes effect immediately.
+        </p>
+      </div>
+
+      {/* Preview */}
+      <div className="bg-dark-bg border border-dark-border rounded-xl p-4">
+        <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Preview</p>
+        <p className="text-sm text-slate-300">This is how your panel text will look at the selected size.</p>
+        <p className="text-xs text-slate-500 mt-1">Smaller text like labels, timestamps, and descriptions.</p>
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { data: agentsData } = useQuery({
     queryKey: ['agents'],
@@ -527,10 +580,8 @@ export default function SettingsPage() {
         <TelegramSection agents={agents} />
       </Section>
 
-      <Section title="Appearance" description="UI customization (coming soon)">
-        <div className="flex items-center justify-center h-20 text-slate-600">
-          <p className="text-sm">More settings coming soon...</p>
-        </div>
+      <Section title="Appearance" description="Customize the control panel look and feel">
+        <AppearanceSection />
       </Section>
     </div>
   )
