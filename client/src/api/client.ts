@@ -500,6 +500,22 @@ export const chatWithInternalAgent = (
     )
     .then((r) => r.data)
 
+// ─── Assistant Settings ──────────────────────────────────────────────────────
+
+export const getAssistantSettings = () =>
+  api.get<{ data: { provider: string; model: string } }>('/internal-agent/settings').then((r) => r.data)
+
+export const setAssistantSettings = (provider: string, model: string) =>
+  api.post<{ success: boolean }>('/internal-agent/settings', { provider, model }).then((r) => r.data)
+
+// ─── Telegram Token Management ───────────────────────────────────────────────
+
+export const getTelegramStatus = () =>
+  api.get<{ data: { connected: boolean; botUsername?: string; token?: string } }>('/settings/telegram-status').then((r) => r.data)
+
+export const setTelegramToken = (token: string) =>
+  api.post<{ success: boolean; message: string }>('/settings/telegram-token', { token }).then((r) => r.data)
+
 // ─── OpenClaw Discovery ───────────────────────────────────────────────────────
 
 export const discoverOpenclaw = (host: string, port: number) =>
@@ -607,6 +623,9 @@ export const getHeartbeat = (sinceMin = 5, orgId?: string) =>
 
 export const updateOrgStatus = (orgId: string, status: 'active' | 'paused') =>
   api.patch<{ data: Organization }>(`/business/organizations/${orgId}/status`, { status }).then((r) => r.data)
+
+export const deleteOrganization = (orgId: string) =>
+  api.delete<{ success: boolean; message: string }>(`/business/organizations/${orgId}`).then((r) => r.data)
 
 // ─── Shared Memory (Organization) ────────────────────────────────────────────
 

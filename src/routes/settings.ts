@@ -182,6 +182,36 @@ router.delete('/telegram-routes/:command', async (req: Request, res: Response) =
   }
 });
 
+// ─── GET /api/settings/telegram-status ────────────────────────────────────────
+
+router.get('/telegram-status', async (req: Request, res: Response) => {
+  try {
+    const token = process.env.TELEGRAM_BOT_TOKEN || await getSetting('telegram_bot_token') || '';
+    const hasToken = token.length > 10;
+    res.json({ data: { connected: hasToken, token: hasToken ? `${token.slice(0, 5)}...${token.slice(-4)}` : '' } });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get Telegram status' });
+  }
+});
+
+// ─── POST /api/settings/telegram-token ───────────────────────────────────────
+
+router.post('/telegram-token', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'token is required' });
+      return;
+    }
+    await setSetting('telegram_bot_token', token);
+    // Also set env for current process
+    process.env.TELEGRAM_BOT_TOKEN = token;
+    res.json({ success: true, message: 'Telegram bot token saved. Restart server to reconnect bot.' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save Telegram token' });
+  }
+});
+
 // ─── GET /api/settings/api-keys ─────────────────────────────────────────────
 // Returns list with hint only — never full keys
 

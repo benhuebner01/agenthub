@@ -27,6 +27,10 @@ import {
   deleteApiKey,
   testApiKeyById,
   toggleApiKey,
+  getAssistantSettings,
+  setAssistantSettings,
+  getTelegramStatus,
+  setTelegramToken,
   Agent,
   TelegramRoutes,
   ApiKeyEntry,
@@ -49,6 +53,122 @@ function Section({
         {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
       </div>
       <div className="p-5">{children}</div>
+    </div>
+  )
+}
+
+// ─── Assistant Config Section ─────────────────────────────────────────────────
+
+function AssistantSection() {
+  const toast = useToast()
+  const [provider, setProvider] = useState('anthropic')
+  const [model, setModel] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const { data: settingsData } = useQuery({
+    queryKey: ['assistantSettings'],
+    queryFn: getAssistantSettings,
+  })
+
+  useEffect(() => {
+    if (settingsData?.data) {
+      setProvider(settingsData.data.provider || 'anthropic')
+      setModel(settingsData.data.model || '')
+    }
+  }, [settingsData])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await setAssistantSettings(provider, model)
+      toast.success('Assistant settings saved')
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-slate-300 mb-2">Provider</label>
+        <select value={provider} onChange={(e) => setProvider(e.target.value)}
+          className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI (GPT)</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-300 mb-2">Model</label>
+        <input type="text" value={model} onChange={(e) => setModel(e.target.value)}
+          placeholder={provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'}
+          className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-accent-purple/50" />
+        <p className="text-xs text-slate-500 mt-1">Leave empty to use default model. Uses API keys from the API Keys section.</p>
+      </div>
+      <button onClick={handleSave} disabled={saving}
+        className="flex items-center gap-2 px-4 py-2.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors">
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+        Save Settings
+      </button>
+    </div>
+  )
+}
+
+// ─── Telegram Token Input ────────────────────────────────────────────────────
+
+function TelegramTokenInput() {
+  const toast = useToast()
+  const [token, setToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const { data: statusData } = useQuery({
+    queryKey: ['telegramStatus'],
+    queryFn: getTelegramStatus,
+  })
+
+  const status = statusData?.data
+
+  const handleSave = async () => {
+    if (!token.trim()) return
+    setSaving(true)
+    try {
+      await setTelegramToken(token.trim())
+      toast.success('Telegram token saved. Restart server to connect.')
+      setToken('')
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${status?.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className="text-xs text-slate-400">
+          {status?.connected ? `Connected (${status.token})` : 'Not connected'}
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <input
+          type={showToken ? 'text' : 'password'}
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Enter new bot token from @BotFather..."
+          className="flex-1 px-3 py-2.5 bg-dark-bg border border-dark-border rounded-xl text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-accent-purple/50"
+        />
+        <button onClick={() => setShowToken(!showToken)} className="px-2.5 text-slate-400 hover:text-slate-200">
+          {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+        <button onClick={handleSave} disabled={!token.trim() || saving}
+          className="px-4 py-2.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-sm rounded-xl transition-colors">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+        </button>
+      </div>
+      <p className="text-xs text-slate-600">Get a bot token from <a href="https://t.me/BotFather" target="_blank" rel="noopener" className="text-accent-purple hover:underline">@BotFather</a> on Telegram. Server restart required after changing.</p>
     </div>
   )
 }
@@ -111,6 +231,12 @@ function TelegramSection({ agents }: { agents: Agent[] }) {
 
   return (
     <div className="space-y-6">
+      {/* Telegram Bot Token */}
+      <div className="mb-6 pb-6 border-b border-dark-border">
+        <label className="block text-sm font-medium text-slate-300 mb-2">Bot Token</label>
+        <TelegramTokenInput />
+      </div>
+
       {/* Default Agent */}
       <div>
         <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -556,7 +682,7 @@ export default function SettingsPage() {
   const agents = agentsData?.data ?? []
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-5xl">
       <div className="flex items-center gap-3">
         <Settings className="w-6 h-6 text-slate-400" />
         <div>
@@ -565,9 +691,15 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <Section title="Security" description="API key and access control">
-        <SecuritySection />
-      </Section>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <Section title="AgentHub Assistant" description="Configure the built-in AI assistant (bottom-right chat)">
+          <AssistantSection />
+        </Section>
+
+        <Section title="Security" description="API key and access control">
+          <SecuritySection />
+        </Section>
+      </div>
 
       <Section title="API Keys" description="Securely manage your AI provider API keys">
         <ApiKeysSection />

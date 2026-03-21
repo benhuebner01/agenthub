@@ -14,6 +14,9 @@ import {
   Brain,
   Plus,
   Trash2,
+  UserPlus,
+  UserMinus,
+  AlertTriangle,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -24,6 +27,7 @@ import {
   rejectProposal,
   runCeo,
   updateOrgStatus,
+  deleteOrganization,
   getAgents,
   updateAgent,
   getOrgMemory,
@@ -566,6 +570,43 @@ export default function OrganizationPage() {
     onError: (err: Error) => toast.error(err.message),
   })
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [addAgentId, setAddAgentId] = useState('')
+
+  const deleteOrgMutation = useMutation({
+    mutationFn: () => deleteOrganization(activeOrgId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['organizations'] })
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Organization deleted')
+      setSelectedOrgId(null)
+      setShowDeleteConfirm(false)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const addToOrgMutation = useMutation({
+    mutationFn: (agentId: string) => updateAgent(agentId, { organizationId: activeOrgId! }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent added to organization')
+      setAddAgentId('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const removeFromOrgMutation = useMutation({
+    mutationFn: (agentId: string) => updateAgent(agentId, { organizationId: null as any, parentAgentId: null as any }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent removed from organization')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
   if (orgsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -669,6 +710,13 @@ export default function OrganizationPage() {
             <Building2 className="w-4 h-4" />
             New Org
           </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="flex items-center gap-2 px-3 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 text-sm font-medium rounded-lg border border-red-600/20 transition-colors"
+            title="Delete Organization"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -697,6 +745,40 @@ export default function OrganizationPage() {
               </button>
               <button
                 onClick={() => setShowCeoRun(false)}
+                className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-sm rounded-lg border border-dark-border"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-dark-card border border-dark-border rounded-2xl p-6 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Delete Organization</h3>
+                <p className="text-sm text-slate-400">This will remove "{org?.name}"</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-400 mb-4">
+              Agents will be detached (not deleted). Shared memory and proposals will be permanently removed.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => deleteOrgMutation.mutate()}
+                disabled={deleteOrgMutation.isPending}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium text-sm rounded-lg transition-colors"
+              >
+                {deleteOrgMutation.isPending ? 'Deleting...' : 'Delete Organization'}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
                 className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-sm rounded-lg border border-dark-border"
               >
                 Cancel
@@ -748,6 +830,72 @@ export default function OrganizationPage() {
             ))}
           </div>
         </div>
+
+        {/* Agent Management */}
+        {editMode && activeOrgId && (
+          <div className="xl:col-span-4 bg-dark-card border border-dark-border rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-dark-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-accent-purple" />
+                <h2 className="text-base font-semibold text-white">Manage Agents</h2>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Add Agent */}
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-xs text-slate-400 mb-1.5">Add Agent to Organization</label>
+                  <select
+                    value={addAgentId}
+                    onChange={(e) => setAddAgentId(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                  >
+                    <option value="">Select an unassigned agent...</option>
+                    {allAgents.filter((a) => !a.organizationId).map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.type} · {a.role})</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => addAgentId && addToOrgMutation.mutate(addAgentId)}
+                  disabled={!addAgentId || addToOrgMutation.isPending}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Add
+                </button>
+              </div>
+
+              {/* Current Agents List */}
+              <div>
+                <p className="text-xs text-slate-400 mb-2">Current Organization Agents</p>
+                <div className="space-y-2">
+                  {allAgents.filter((a) => a.organizationId === activeOrgId).map((a) => (
+                    <div key={a.id} className="flex items-center justify-between px-4 py-3 bg-dark-bg border border-dark-border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <span className={`w-2 h-2 rounded-full ${a.status === 'active' ? 'bg-green-500' : a.status === 'paused' ? 'bg-yellow-500' : 'bg-red-500'}`} />
+                        <div>
+                          <p className="text-sm font-medium text-slate-200">{a.name}</p>
+                          <p className="text-xs text-slate-500">{a.type} · {a.role}{a.jobDescription ? ` · ${a.jobDescription}` : ''}</p>
+                        </div>
+                      </div>
+                      {a.role !== 'ceo' && (
+                        <button
+                          onClick={() => removeFromOrgMutation.mutate(a.id)}
+                          disabled={removeFromOrgMutation.isPending}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 text-xs font-medium rounded-lg border border-red-600/20 transition-colors"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Right Column: Proposals + Shared Memory */}
         <div className="xl:col-span-1 space-y-6">

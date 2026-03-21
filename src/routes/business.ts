@@ -603,6 +603,26 @@ router.patch('/organizations/:id/status', async (req: Request, res: Response) =>
   }
 });
 
+// ─── DELETE /api/business/organizations/:id ──────────────────────────────────
+router.delete('/organizations/:id', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId));
+    if (!org) {
+      res.status(404).json({ error: 'Organization not found' });
+      return;
+    }
+    // Unlink agents from org (don't delete them, just detach)
+    await db.update(agents).set({ organizationId: null, parentAgentId: null }).where(eq(agents.organizationId, orgId));
+    // Delete org (cascading deletes shared memory and proposals)
+    await db.delete(organizations).where(eq(organizations.id, orgId));
+    res.json({ success: true, message: `Organization "${org.name}" deleted` });
+  } catch (err: any) {
+    console.error('[Business] DELETE /organizations/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete organization', details: err.message });
+  }
+});
+
 // ─── Shared Memory — organization-wide key-value (Paperclip-style hub) ───────
 
 router.get('/organizations/:id/memory', async (req: Request, res: Response) => {
