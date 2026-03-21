@@ -1480,7 +1480,6 @@ function OpenClawConfig({
       host,
       port: parseInt(port) || 18789,
     }
-    if (model && model !== 'auto') c.model = model
     if (systemPrompt) c.systemPrompt = systemPrompt
     if (connectionType === 'responses' || connectionType === 'tools-invoke') {
       if (gatewayToken) c.token = gatewayToken
@@ -1497,7 +1496,7 @@ function OpenClawConfig({
       if (ocAgentId) c.ocAgentId = ocAgentId
     }
     onChange(c)
-  }, [connectionType, host, port, model, systemPrompt, gatewayToken, ocAgentId, toolName, webhookPath, webhookToken])
+  }, [connectionType, host, port, systemPrompt, gatewayToken, ocAgentId, toolName, webhookPath, webhookToken])
 
   const handleTest = async () => {
     setTestStatus('testing')
@@ -1648,25 +1647,12 @@ function OpenClawConfig({
         </>
       )}
 
-      {/* ── Model (responses + cli) ───────────────────────────────────────── */}
-      {(connectionType === 'responses' || connectionType === 'cli') && (
-        <div>
-          <label className={LABEL_CLASS}>Model <span className="text-slate-600 font-normal">(optional)</span></label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
-            <option value="auto">auto (OpenClaw picks)</option>
-            <option value="gpt">gpt</option>
-            <option value="claude">claude</option>
-            <option value="gemini">gemini</option>
-          </select>
-        </div>
-      )}
-
       {/* ── System Prompt ─────────────────────────────────────────────────── */}
       <div>
-        <label className={LABEL_CLASS}>System Prompt <span className="text-slate-600 font-normal">(optional, prepended to task)</span></label>
+        <label className={LABEL_CLASS}>System Prompt <span className="text-slate-600 font-normal">(optional, wird dem Task vorangestellt)</span></label>
         <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
           rows={2} className={INPUT_CLASS + ' resize-y'}
-          placeholder="You are a helpful assistant..." />
+          placeholder="Du bist ein hilfreicher Assistent..." />
       </div>
 
       {/* ── Test Connection (health check) ─────────────────────────────────── */}
