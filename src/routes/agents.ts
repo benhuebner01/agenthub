@@ -10,6 +10,7 @@ import { checkBudget, recordSpend } from '../services/budget';
 import { scheduleAgent, removeSchedule } from '../services/scheduler';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import memoryRouter from './memory';
 
 const execAsync = promisify(exec);
 
@@ -1025,5 +1026,8 @@ curl -X POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result \\
     res.status(500).json({ error: 'Failed to generate SOUL.md', details: err.message });
   }
 });
+
+// Mount memory/knowledge management sub-routes
+router.use('/:id', memoryRouter);
 
 export default router;

@@ -160,7 +160,7 @@ export default function HeartbeatPage() {
   const runningCount = runs.filter((r) => r.status === 'running' || r.status === 'pending').length
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Activity className="w-6 h-6 text-accent-purple" />

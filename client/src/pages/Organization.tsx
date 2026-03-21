@@ -30,6 +30,7 @@ import {
   deleteOrganization,
   getAgents,
   updateAgent,
+  createAgent,
   getOrgMemory,
   setOrgMemory,
   deleteOrgMemory,
@@ -37,6 +38,8 @@ import {
   Proposal,
   Organization,
   Agent,
+  AgentType,
+  AgentRole,
   SharedMemoryEntry,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
@@ -255,6 +258,7 @@ function AgentDetailPanel({
   const styles = ROLE_STYLES[node.role] || ROLE_STYLES.worker
   const [assignAgent, setAssignAgent] = useState('')
   const [newParent, setNewParent] = useState('')
+  const [confirmRemove, setConfirmRemove] = useState(false)
 
   const assignMutation = useMutation({
     mutationFn: (agentId: string) => updateAgent(agentId, {
@@ -277,6 +281,18 @@ function AgentDetailPanel({
       qc.invalidateQueries({ queryKey: ['orgChart'] })
       toast.success('Parent updated')
       setNewParent('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const removeFromOrgMutation = useMutation({
+    mutationFn: () => updateAgent(node.id, { organizationId: null as any, parentAgentId: null as any }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent removed from organization')
+      setConfirmRemove(false)
+      onClose()
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -403,6 +419,40 @@ function AgentDetailPanel({
             >
               <Pencil className="w-3 h-3" /> Configure agent settings
             </a>
+
+            {/* Remove from Org */}
+            {node.role !== 'ceo' && (
+              <div className="border-t border-dark-border pt-4">
+                {confirmRemove ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-400">Remove this agent from the organization? The agent will not be deleted, only detached.</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => removeFromOrgMutation.mutate()}
+                        disabled={removeFromOrgMutation.isPending}
+                        className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                      >
+                        {removeFromOrgMutation.isPending ? 'Removing...' : 'Confirm Remove'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmRemove(false)}
+                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 text-xs rounded-lg border border-dark-border"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmRemove(true)}
+                    className="flex items-center gap-1.5 w-full justify-center px-3 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 text-xs font-medium rounded-lg border border-red-600/20 transition-colors"
+                  >
+                    <UserMinus className="w-3.5 h-3.5" />
+                    Remove from Organization
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -572,6 +622,10 @@ export default function OrganizationPage() {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [addAgentId, setAddAgentId] = useState('')
+  const [showQuickCreate, setShowQuickCreate] = useState(false)
+  const [quickName, setQuickName] = useState('')
+  const [quickType, setQuickType] = useState<AgentType>('claude')
+  const [quickRole, setQuickRole] = useState<AgentRole>('worker')
 
   const deleteOrgMutation = useMutation({
     mutationFn: () => deleteOrganization(activeOrgId!),
@@ -582,6 +636,10 @@ export default function OrganizationPage() {
       toast.success('Organization deleted')
       setSelectedOrgId(null)
       setShowDeleteConfirm(false)
+      // Navigate to business-setup if this was the last org
+      if (organizations.length <= 1) {
+        navigate('/business-setup')
+      }
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -593,6 +651,31 @@ export default function OrganizationPage() {
       qc.invalidateQueries({ queryKey: ['agents'] })
       toast.success('Agent added to organization')
       setAddAgentId('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const quickCreateMutation = useMutation({
+    mutationFn: () => {
+      // Find the CEO to use as parent
+      const ceoAgent = allAgents.find((a) => a.organizationId === activeOrgId && a.role === 'ceo')
+      return createAgent({
+        name: quickName,
+        type: quickType,
+        role: quickRole,
+        config: {},
+        organizationId: activeOrgId || undefined,
+        parentAgentId: ceoAgent?.id || undefined,
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success(`Agent "${quickName}" created and added to organization`)
+      setQuickName('')
+      setQuickType('claude')
+      setQuickRole('worker')
+      setShowQuickCreate(false)
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -844,7 +927,7 @@ export default function OrganizationPage() {
               {/* Add Agent */}
               <div className="flex gap-3 items-end">
                 <div className="flex-1">
-                  <label className="block text-xs text-slate-400 mb-1.5">Add Agent to Organization</label>
+                  <label className="block text-xs text-slate-400 mb-1.5">Add Existing Agent to Organization</label>
                   <select
                     value={addAgentId}
                     onChange={(e) => setAddAgentId(e.target.value)}
@@ -864,6 +947,78 @@ export default function OrganizationPage() {
                   <UserPlus className="w-4 h-4" />
                   Add
                 </button>
+              </div>
+
+              {/* Quick Create */}
+              <div className="border-t border-dark-border pt-4">
+                {!showQuickCreate ? (
+                  <button
+                    onClick={() => setShowQuickCreate(true)}
+                    className="flex items-center gap-1.5 text-xs text-accent-purple hover:text-purple-300 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Quick-create a new agent
+                  </button>
+                ) : (
+                  <div className="space-y-3 bg-dark-bg border border-dark-border rounded-lg p-4">
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Quick-Create Agent</p>
+                    <input
+                      type="text"
+                      value={quickName}
+                      onChange={(e) => setQuickName(e.target.value)}
+                      placeholder="Agent name"
+                      className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple/50"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Type</label>
+                        <select
+                          value={quickType}
+                          onChange={(e) => setQuickType(e.target.value as AgentType)}
+                          className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-xs text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                        >
+                          <option value="claude">Claude</option>
+                          <option value="openai">OpenAI</option>
+                          <option value="claude-code">Claude Code</option>
+                          <option value="openai-codex">OpenAI Codex</option>
+                          <option value="http">HTTP</option>
+                          <option value="bash">Bash</option>
+                          <option value="a2a">A2A</option>
+                          <option value="mcp">MCP</option>
+                          <option value="internal">Internal</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Role</label>
+                        <select
+                          value={quickRole}
+                          onChange={(e) => setQuickRole(e.target.value as AgentRole)}
+                          className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-xs text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                        >
+                          <option value="worker">Worker</option>
+                          <option value="manager">Manager</option>
+                          <option value="specialist">Specialist</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => quickCreateMutation.mutate()}
+                        disabled={!quickName.trim() || quickCreateMutation.isPending}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {quickCreateMutation.isPending ? 'Creating...' : 'Create & Add'}
+                      </button>
+                      <button
+                        onClick={() => { setShowQuickCreate(false); setQuickName('') }}
+                        className="px-3 py-2 bg-white/5 hover:bg-white/10 text-slate-300 text-xs rounded-lg border border-dark-border"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Current Agents List */}

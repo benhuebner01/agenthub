@@ -638,4 +638,86 @@ export const setOrgMemory = (orgId: string, key: string, value: string) =>
 export const deleteOrgMemory = (orgId: string, key: string) =>
   api.delete<{ success: boolean }>(`/business/organizations/${orgId}/memory/${encodeURIComponent(key)}`).then((r) => r.data)
 
+// ─── Daily Notes ─────────────────────────────────────────────────────────────
+
+export interface DailyNote {
+  id: string
+  agentId: string
+  organizationId: string | null
+  date: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+export const getAgentDailyNotes = (agentId: string) =>
+  api.get<{ data: DailyNote[] }>(`/agents/${agentId}/daily-notes`).then((r) => r.data)
+
+export const setAgentDailyNote = (agentId: string, date: string, content: string) =>
+  api.post<{ data: DailyNote }>(`/agents/${agentId}/daily-notes`, { date, content }).then((r) => r.data)
+
+export const deleteAgentDailyNote = (agentId: string, date: string) =>
+  api.delete<{ message: string }>(`/agents/${agentId}/daily-notes/${date}`).then((r) => r.data)
+
+// ─── Knowledge Base ──────────────────────────────────────────────────────────
+
+export interface KnowledgeEntry {
+  id: string
+  agentId: string | null
+  organizationId: string | null
+  category: 'projects' | 'areas' | 'resources' | 'archives'
+  title: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+export const getAgentKnowledge = (agentId: string) =>
+  api.get<{ data: KnowledgeEntry[] }>(`/agents/${agentId}/knowledge`).then((r) => r.data)
+
+export const createAgentKnowledge = (agentId: string, data: { category: string; title: string; content: string }) =>
+  api.post<{ data: KnowledgeEntry }>(`/agents/${agentId}/knowledge`, data).then((r) => r.data)
+
+export const updateAgentKnowledge = (agentId: string, kbId: string, data: Partial<{ category: string; title: string; content: string }>) =>
+  api.put<{ data: KnowledgeEntry }>(`/agents/${agentId}/knowledge/${kbId}`, data).then((r) => r.data)
+
+export const deleteAgentKnowledge = (agentId: string, kbId: string) =>
+  api.delete<{ message: string }>(`/agents/${agentId}/knowledge/${kbId}`).then((r) => r.data)
+
+export const getOrgKnowledge = (orgId: string) =>
+  api.get<{ data: KnowledgeEntry[] }>(`/business/organizations/${orgId}/knowledge`).then((r) => r.data)
+
+export const createOrgKnowledge = (orgId: string, data: { category: string; title: string; content: string }) =>
+  api.post<{ data: KnowledgeEntry }>(`/business/organizations/${orgId}/knowledge`, data).then((r) => r.data)
+
+export const updateOrgKnowledge = (orgId: string, kbId: string, data: Partial<{ category: string; title: string; content: string }>) =>
+  api.put<{ data: KnowledgeEntry }>(`/business/organizations/${orgId}/knowledge/${kbId}`, data).then((r) => r.data)
+
+export const deleteOrgKnowledge = (orgId: string, kbId: string) =>
+  api.delete<{ message: string }>(`/business/organizations/${orgId}/knowledge/${kbId}`).then((r) => r.data)
+
+// ─── Tacit Knowledge ─────────────────────────────────────────────────────────
+
+export interface TacitEntry {
+  id: string
+  agentId: string
+  topic: string
+  insight: string
+  confidence: number
+  createdAt: string
+  updatedAt: string
+}
+
+export const getAgentTacit = (agentId: string) =>
+  api.get<{ data: TacitEntry[] }>(`/agents/${agentId}/tacit`).then((r) => r.data)
+
+export const createAgentTacit = (agentId: string, data: { topic: string; insight: string; confidence?: number }) =>
+  api.post<{ data: TacitEntry }>(`/agents/${agentId}/tacit`, data).then((r) => r.data)
+
+export const updateAgentTacit = (agentId: string, tacitId: string, data: Partial<{ topic: string; insight: string; confidence: number }>) =>
+  api.put<{ data: TacitEntry }>(`/agents/${agentId}/tacit/${tacitId}`, data).then((r) => r.data)
+
+export const deleteAgentTacit = (agentId: string, tacitId: string) =>
+  api.delete<{ message: string }>(`/agents/${agentId}/tacit/${tacitId}`).then((r) => r.data)
+
 export default api

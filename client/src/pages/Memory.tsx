@@ -14,6 +14,8 @@ import {
   FileText,
   BookOpen,
   X,
+  Calendar,
+  Lightbulb,
 } from 'lucide-react'
 import {
   getOrganizations,
@@ -24,17 +26,37 @@ import {
   getAgentMemory,
   setAgentMemory,
   deleteAgentMemory,
+  getAgentDailyNotes,
+  setAgentDailyNote,
+  deleteAgentDailyNote,
+  getAgentKnowledge,
+  createAgentKnowledge,
+  updateAgentKnowledge,
+  deleteAgentKnowledge,
+  getOrgKnowledge,
+  createOrgKnowledge,
+  updateOrgKnowledge,
+  deleteOrgKnowledge,
+  getAgentTacit,
+  createAgentTacit,
+  updateAgentTacit,
+  deleteAgentTacit,
   Organization,
   Agent,
   SharedMemoryEntry,
   AgentMemoryEntry,
+  DailyNote,
+  KnowledgeEntry,
+  TacitEntry,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+type FileType = 'org-memory' | 'agent-memory' | 'agent-system-prompt' | 'daily-note' | 'knowledge' | 'tacit' | 'org-knowledge'
+
 interface SelectedFile {
-  type: 'org-memory' | 'agent-memory' | 'agent-system-prompt'
+  type: FileType
   orgId?: string
   orgName?: string
   agentId?: string
@@ -43,7 +65,19 @@ interface SelectedFile {
   value: string
   updatedAt?: string
   readOnly?: boolean
+  // Extra fields for specific types
+  entryId?: string
+  category?: string
+  confidence?: number
 }
+
+type AddingToType =
+  | { type: 'org'; id: string }
+  | { type: 'agent'; id: string }
+  | { type: 'daily-note'; agentId: string }
+  | { type: 'knowledge'; agentId: string; category: string }
+  | { type: 'tacit'; agentId: string }
+  | { type: 'org-knowledge'; orgId: string; category: string }
 
 // ─── Folder Tree Item ────────────────────────────────────────────────────────
 
@@ -52,6 +86,7 @@ function TreeFolder({
   icon,
   isOpen,
   onToggle,
+  onAdd,
   children,
   depth = 0,
 }: {
@@ -59,29 +94,45 @@ function TreeFolder({
   icon?: React.ReactNode
   isOpen: boolean
   onToggle: () => void
+  onAdd?: () => void
   children?: React.ReactNode
   depth?: number
 }) {
   return (
-    <div>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm text-slate-300 hover:bg-white/5 rounded transition-colors"
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-      >
-        {isOpen ? (
-          <ChevronDown size={13} className="text-slate-500 flex-shrink-0" />
-        ) : (
-          <ChevronRight size={13} className="text-slate-500 flex-shrink-0" />
+    <div className="group/folder">
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 flex items-center gap-1.5 px-2 py-1 text-left text-sm text-slate-300 hover:bg-white/5 rounded transition-colors"
+          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        >
+          {isOpen ? (
+            <ChevronDown size={13} className="text-slate-500 flex-shrink-0" />
+          ) : (
+            <ChevronRight size={13} className="text-slate-500 flex-shrink-0" />
+          )}
+          {icon || (isOpen ? (
+            <FolderOpen size={14} className="text-yellow-500/80 flex-shrink-0" />
+          ) : (
+            <Folder size={14} className="text-yellow-500/80 flex-shrink-0" />
+          ))}
+          <span className="truncate">{label}</span>
+        </button>
+        {onAdd && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onAdd()
+            }}
+            className="opacity-0 group-hover/folder:opacity-100 p-0.5 mr-2 text-slate-500 hover:text-accent-purple transition-all"
+            title="Add new entry"
+          >
+            <Plus size={13} />
+          </button>
         )}
-        {icon || (isOpen ? (
-          <FolderOpen size={14} className="text-yellow-500/80 flex-shrink-0" />
-        ) : (
-          <Folder size={14} className="text-yellow-500/80 flex-shrink-0" />
-        ))}
-        <span className="truncate">{label}</span>
-      </button>
+      </div>
       {isOpen && children}
     </div>
   )
@@ -89,13 +140,17 @@ function TreeFolder({
 
 function TreeFile({
   label,
+  icon,
   isSelected,
   onClick,
+  badge,
   depth = 0,
 }: {
   label: string
+  icon?: React.ReactNode
   isSelected: boolean
   onClick: () => void
+  badge?: React.ReactNode
   depth?: number
 }) {
   return (
@@ -109,8 +164,9 @@ function TreeFile({
       }`}
       style={{ paddingLeft: `${depth * 16 + 8}px` }}
     >
-      <FileText size={13} className="flex-shrink-0" />
-      <span className="truncate">{label}</span>
+      {icon || <FileText size={13} className="flex-shrink-0" />}
+      <span className="truncate flex-1">{label}</span>
+      {badge}
     </button>
   )
 }
@@ -138,9 +194,11 @@ function TreePlaceholder({
 function AddFileInline({
   onAdd,
   onCancel,
+  placeholder = 'file_name',
 }: {
   onAdd: (key: string) => void
   onCancel: () => void
+  placeholder?: string
 }) {
   const [key, setKey] = useState('')
 
@@ -149,7 +207,7 @@ function AddFileInline({
       <input
         type="text"
         autoFocus
-        placeholder="file_name"
+        placeholder={placeholder}
         value={key}
         onChange={(e) => setKey(e.target.value)}
         onKeyDown={(e) => {
@@ -195,7 +253,7 @@ function FileViewer({
   useEffect(() => {
     setEditValue(file.value)
     setConfirmDelete(false)
-  }, [file.key, file.agentId, file.orgId, file.type, file.value])
+  }, [file.key, file.agentId, file.orgId, file.type, file.value, file.entryId])
 
   const breadcrumbParts: string[] = []
   if (file.orgName) breadcrumbParts.push(file.orgName)
@@ -203,6 +261,10 @@ function FileViewer({
   if (file.type === 'org-memory') breadcrumbParts.push('Shared Memory')
   if (file.type === 'agent-memory') breadcrumbParts.push('Memory')
   if (file.type === 'agent-system-prompt') breadcrumbParts.push('System Prompt')
+  if (file.type === 'daily-note') breadcrumbParts.push('Daily Notes')
+  if (file.type === 'knowledge') breadcrumbParts.push('Knowledge', file.category || '')
+  if (file.type === 'org-knowledge') breadcrumbParts.push('Knowledge Base', file.category || '')
+  if (file.type === 'tacit') breadcrumbParts.push('Tacit Knowledge')
   breadcrumbParts.push(file.key)
 
   const handleDelete = () => {
@@ -219,15 +281,25 @@ function FileViewer({
     <div className="flex flex-col h-full">
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 px-4 py-3 border-b border-dark-border text-xs text-slate-400 overflow-x-auto flex-shrink-0">
-        {breadcrumbParts.map((part, i) => (
+        {breadcrumbParts.filter(Boolean).map((part, i) => (
           <span key={i} className="flex items-center gap-1.5 flex-shrink-0">
             {i > 0 && <span className="text-slate-600">/</span>}
-            <span className={i === breadcrumbParts.length - 1 ? 'text-slate-200 font-medium' : ''}>
+            <span className={i === breadcrumbParts.filter(Boolean).length - 1 ? 'text-slate-200 font-medium' : ''}>
               {part}
             </span>
           </span>
         ))}
       </div>
+
+      {/* Confidence badge for tacit */}
+      {file.type === 'tacit' && file.confidence !== undefined && (
+        <div className="px-4 pt-3 flex-shrink-0">
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+            <Lightbulb size={12} />
+            Confidence: {Math.round(file.confidence * 100)}%
+          </span>
+        </div>
+      )}
 
       {/* Editor area */}
       <div className="flex-1 p-4 overflow-auto">
@@ -296,15 +368,23 @@ function WelcomeScreen() {
       <h2 className="text-lg font-semibold text-white mb-2">Knowledge & Memory</h2>
       <p className="text-sm text-slate-400 max-w-md leading-relaxed">
         Select a file from the folder tree on the left to view or edit its contents.
-        Organization shared memory and individual agent memory entries are organized
-        as files in a folder structure.
+        Organization shared memory, knowledge bases, daily notes, and tacit knowledge
+        are organized as files in a folder structure.
       </p>
       <div className="mt-6 space-y-2 text-xs text-slate-500">
         <p>Click a folder to expand it and see its contents.</p>
-        <p>Click the <Plus size={12} className="inline" /> button next to a Memory folder to add a new entry.</p>
+        <p>Hover over a folder and click the <Plus size={12} className="inline" /> button to add a new entry.</p>
       </div>
     </div>
   )
+}
+
+// ─── Knowledge category helpers ──────────────────────────────────────────────
+
+const KB_CATEGORIES = ['projects', 'areas', 'resources', 'archives'] as const
+
+function categoryLabel(cat: string) {
+  return cat.charAt(0).toUpperCase() + cat.slice(1)
 }
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
@@ -323,7 +403,7 @@ export default function Memory() {
   // ── State ──
   const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null)
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({})
-  const [addingTo, setAddingTo] = useState<{ type: 'org' | 'agent'; id: string } | null>(null)
+  const [addingTo, setAddingTo] = useState<AddingToType | null>(null)
 
   // Group agents by org
   const agentsByOrg = useMemo(() => {
@@ -389,14 +469,97 @@ export default function Memory() {
   })
   const agentMemoryMap = agentMemoryQueries.data ?? {}
 
-  // ── Mutations ──
+  // ── Daily notes queries ──
+  const openDailyNoteAgentIds = agents
+    .filter((a) => openFolders[`agent-${a.id}-daily`])
+    .map((a) => a.id)
+
+  const dailyNotesQueries = useQuery({
+    queryKey: ['dailyNotes-all', openDailyNoteAgentIds],
+    queryFn: async () => {
+      const results: Record<string, DailyNote[]> = {}
+      await Promise.all(
+        openDailyNoteAgentIds.map(async (id) => {
+          const res = await getAgentDailyNotes(id)
+          results[id] = res.data
+        })
+      )
+      return results
+    },
+    enabled: openDailyNoteAgentIds.length > 0,
+  })
+  const dailyNotesMap = dailyNotesQueries.data ?? {}
+
+  // ── Agent knowledge queries ──
+  const openAgentKbIds = agents
+    .filter((a) => openFolders[`agent-${a.id}-kb`])
+    .map((a) => a.id)
+
+  const agentKbQueries = useQuery({
+    queryKey: ['agentKb-all', openAgentKbIds],
+    queryFn: async () => {
+      const results: Record<string, KnowledgeEntry[]> = {}
+      await Promise.all(
+        openAgentKbIds.map(async (id) => {
+          const res = await getAgentKnowledge(id)
+          results[id] = res.data
+        })
+      )
+      return results
+    },
+    enabled: openAgentKbIds.length > 0,
+  })
+  const agentKbMap = agentKbQueries.data ?? {}
+
+  // ── Org knowledge queries ──
+  const openOrgKbIds = orgs
+    .filter((o) => openFolders[`org-${o.id}-kb`])
+    .map((o) => o.id)
+
+  const orgKbQueries = useQuery({
+    queryKey: ['orgKb-all', openOrgKbIds],
+    queryFn: async () => {
+      const results: Record<string, KnowledgeEntry[]> = {}
+      await Promise.all(
+        openOrgKbIds.map(async (id) => {
+          const res = await getOrgKnowledge(id)
+          results[id] = res.data
+        })
+      )
+      return results
+    },
+    enabled: openOrgKbIds.length > 0,
+  })
+  const orgKbMap = orgKbQueries.data ?? {}
+
+  // ── Tacit knowledge queries ──
+  const openTacitAgentIds = agents
+    .filter((a) => openFolders[`agent-${a.id}-tacit`])
+    .map((a) => a.id)
+
+  const tacitQueries = useQuery({
+    queryKey: ['tacit-all', openTacitAgentIds],
+    queryFn: async () => {
+      const results: Record<string, TacitEntry[]> = {}
+      await Promise.all(
+        openTacitAgentIds.map(async (id) => {
+          const res = await getAgentTacit(id)
+          results[id] = res.data
+        })
+      )
+      return results
+    },
+    enabled: openTacitAgentIds.length > 0,
+  })
+  const tacitMap = tacitQueries.data ?? {}
+
+  // ── Mutations: Org Memory ──
   const saveOrgMem = useMutation({
     mutationFn: ({ orgId, key, value }: { orgId: string; key: string; value: string }) =>
       setOrgMemory(orgId, key, value),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['orgMemory-all'] })
       toast.success('Saved')
-      // Update selected file value so isDirty resets
       setSelectedFile((prev) =>
         prev && prev.type === 'org-memory' && prev.orgId === vars.orgId && prev.key === vars.key
           ? { ...prev, value: vars.value }
@@ -417,6 +580,7 @@ export default function Memory() {
     onError: (err: Error) => toast.error(err.message),
   })
 
+  // ── Mutations: Agent Memory ──
   const saveAgentMem = useMutation({
     mutationFn: ({ agentId, key, value }: { agentId: string; key: string; value: string }) =>
       setAgentMemory(agentId, key, value),
@@ -443,59 +607,318 @@ export default function Memory() {
     onError: (err: Error) => toast.error(err.message),
   })
 
+  // ── Mutations: Daily Notes ──
+  const saveDailyNote = useMutation({
+    mutationFn: ({ agentId, date, content }: { agentId: string; date: string; content: string }) =>
+      setAgentDailyNote(agentId, date, content),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['dailyNotes-all'] })
+      toast.success('Saved')
+      setSelectedFile((prev) =>
+        prev && prev.type === 'daily-note' && prev.agentId === vars.agentId && prev.key === vars.date
+          ? { ...prev, value: vars.content }
+          : prev
+      )
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteDailyNote = useMutation({
+    mutationFn: ({ agentId, date }: { agentId: string; date: string }) =>
+      deleteAgentDailyNote(agentId, date),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dailyNotes-all'] })
+      toast.success('Deleted')
+      setSelectedFile(null)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  // ── Mutations: Agent Knowledge ──
+  const saveAgentKb = useMutation({
+    mutationFn: ({ agentId, entryId, data }: { agentId: string; entryId?: string; data: { category: string; title: string; content: string } }) =>
+      entryId ? updateAgentKnowledge(agentId, entryId, data) : createAgentKnowledge(agentId, data),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['agentKb-all'] })
+      toast.success('Saved')
+      if (vars.entryId) {
+        setSelectedFile((prev) =>
+          prev && prev.type === 'knowledge' && prev.entryId === vars.entryId
+            ? { ...prev, value: vars.data.content }
+            : prev
+        )
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteAgentKb = useMutation({
+    mutationFn: ({ agentId, entryId }: { agentId: string; entryId: string }) =>
+      deleteAgentKnowledge(agentId, entryId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agentKb-all'] })
+      toast.success('Deleted')
+      setSelectedFile(null)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  // ── Mutations: Org Knowledge ──
+  const saveOrgKb = useMutation({
+    mutationFn: ({ orgId, entryId, data }: { orgId: string; entryId?: string; data: { category: string; title: string; content: string } }) =>
+      entryId ? updateOrgKnowledge(orgId, entryId, data) : createOrgKnowledge(orgId, data),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['orgKb-all'] })
+      toast.success('Saved')
+      if (vars.entryId) {
+        setSelectedFile((prev) =>
+          prev && prev.type === 'org-knowledge' && prev.entryId === vars.entryId
+            ? { ...prev, value: vars.data.content }
+            : prev
+        )
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteOrgKb = useMutation({
+    mutationFn: ({ orgId, entryId }: { orgId: string; entryId: string }) =>
+      deleteOrgKnowledge(orgId, entryId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgKb-all'] })
+      toast.success('Deleted')
+      setSelectedFile(null)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  // ── Mutations: Tacit Knowledge ──
+  const saveTacit = useMutation({
+    mutationFn: ({ agentId, entryId, data }: { agentId: string; entryId?: string; data: { topic: string; insight: string; confidence?: number } }) =>
+      entryId ? updateAgentTacit(agentId, entryId, data) : createAgentTacit(agentId, data),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['tacit-all'] })
+      toast.success('Saved')
+      if (vars.entryId) {
+        setSelectedFile((prev) =>
+          prev && prev.type === 'tacit' && prev.entryId === vars.entryId
+            ? { ...prev, value: vars.data.insight }
+            : prev
+        )
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteTacit = useMutation({
+    mutationFn: ({ agentId, entryId }: { agentId: string; entryId: string }) =>
+      deleteAgentTacit(agentId, entryId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tacit-all'] })
+      toast.success('Deleted')
+      setSelectedFile(null)
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
   // ── Handlers ──
   const handleSave = (value: string) => {
     if (!selectedFile || selectedFile.readOnly) return
-    if (selectedFile.type === 'org-memory' && selectedFile.orgId) {
-      saveOrgMem.mutate({ orgId: selectedFile.orgId, key: selectedFile.key, value })
-    } else if (selectedFile.type === 'agent-memory' && selectedFile.agentId) {
-      saveAgentMem.mutate({ agentId: selectedFile.agentId, key: selectedFile.key, value })
+
+    switch (selectedFile.type) {
+      case 'org-memory':
+        if (selectedFile.orgId) saveOrgMem.mutate({ orgId: selectedFile.orgId, key: selectedFile.key, value })
+        break
+      case 'agent-memory':
+        if (selectedFile.agentId) saveAgentMem.mutate({ agentId: selectedFile.agentId, key: selectedFile.key, value })
+        break
+      case 'daily-note':
+        if (selectedFile.agentId) saveDailyNote.mutate({ agentId: selectedFile.agentId, date: selectedFile.key, content: value })
+        break
+      case 'knowledge':
+        if (selectedFile.agentId && selectedFile.category) {
+          saveAgentKb.mutate({
+            agentId: selectedFile.agentId,
+            entryId: selectedFile.entryId,
+            data: { category: selectedFile.category, title: selectedFile.key, content: value },
+          })
+        }
+        break
+      case 'org-knowledge':
+        if (selectedFile.orgId && selectedFile.category) {
+          saveOrgKb.mutate({
+            orgId: selectedFile.orgId,
+            entryId: selectedFile.entryId,
+            data: { category: selectedFile.category, title: selectedFile.key, content: value },
+          })
+        }
+        break
+      case 'tacit':
+        if (selectedFile.agentId) {
+          saveTacit.mutate({
+            agentId: selectedFile.agentId,
+            entryId: selectedFile.entryId,
+            data: { topic: selectedFile.key, insight: value, confidence: selectedFile.confidence },
+          })
+        }
+        break
     }
   }
 
   const handleDelete = () => {
     if (!selectedFile || selectedFile.readOnly) return
-    if (selectedFile.type === 'org-memory' && selectedFile.orgId) {
-      deleteOrgMem.mutate({ orgId: selectedFile.orgId, key: selectedFile.key })
-    } else if (selectedFile.type === 'agent-memory' && selectedFile.agentId) {
-      deleteAgentMem.mutate({ agentId: selectedFile.agentId, key: selectedFile.key })
+
+    switch (selectedFile.type) {
+      case 'org-memory':
+        if (selectedFile.orgId) deleteOrgMem.mutate({ orgId: selectedFile.orgId, key: selectedFile.key })
+        break
+      case 'agent-memory':
+        if (selectedFile.agentId) deleteAgentMem.mutate({ agentId: selectedFile.agentId, key: selectedFile.key })
+        break
+      case 'daily-note':
+        if (selectedFile.agentId) deleteDailyNote.mutate({ agentId: selectedFile.agentId, date: selectedFile.key })
+        break
+      case 'knowledge':
+        if (selectedFile.agentId && selectedFile.entryId) deleteAgentKb.mutate({ agentId: selectedFile.agentId, entryId: selectedFile.entryId })
+        break
+      case 'org-knowledge':
+        if (selectedFile.orgId && selectedFile.entryId) deleteOrgKb.mutate({ orgId: selectedFile.orgId, entryId: selectedFile.entryId })
+        break
+      case 'tacit':
+        if (selectedFile.agentId && selectedFile.entryId) deleteTacit.mutate({ agentId: selectedFile.agentId, entryId: selectedFile.entryId })
+        break
     }
   }
 
   const handleAddFile = (key: string) => {
     if (!addingTo) return
-    if (addingTo.type === 'org') {
-      saveOrgMem.mutate({ orgId: addingTo.id, key, value: '' })
-      // Select the new file
-      const org = orgs.find((o) => o.id === addingTo.id)
-      setSelectedFile({
-        type: 'org-memory',
-        orgId: addingTo.id,
-        orgName: org?.name,
-        key,
-        value: '',
-      })
-    } else {
-      saveAgentMem.mutate({ agentId: addingTo.id, key, value: '' })
-      const agent = agents.find((a) => a.id === addingTo.id)
-      const org = orgs.find((o) => o.id === agent?.organizationId)
-      setSelectedFile({
-        type: 'agent-memory',
-        orgId: org?.id,
-        orgName: org?.name,
-        agentId: addingTo.id,
-        agentName: agent?.name,
-        key,
-        value: '',
-      })
+
+    switch (addingTo.type) {
+      case 'org': {
+        saveOrgMem.mutate({ orgId: addingTo.id, key, value: '' })
+        const org = orgs.find((o) => o.id === addingTo.id)
+        setSelectedFile({ type: 'org-memory', orgId: addingTo.id, orgName: org?.name, key, value: '' })
+        break
+      }
+      case 'agent': {
+        saveAgentMem.mutate({ agentId: addingTo.id, key, value: '' })
+        const agent = agents.find((a) => a.id === addingTo.id)
+        const org = orgs.find((o) => o.id === agent?.organizationId)
+        setSelectedFile({ type: 'agent-memory', orgId: org?.id, orgName: org?.name, agentId: addingTo.id, agentName: agent?.name, key, value: '' })
+        break
+      }
+      case 'daily-note': {
+        saveDailyNote.mutate({ agentId: addingTo.agentId, date: key, content: '' })
+        const agent = agents.find((a) => a.id === addingTo.agentId)
+        const org = orgs.find((o) => o.id === agent?.organizationId)
+        setSelectedFile({ type: 'daily-note', orgId: org?.id, orgName: org?.name, agentId: addingTo.agentId, agentName: agent?.name, key, value: '' })
+        break
+      }
+      case 'knowledge': {
+        saveAgentKb.mutate({ agentId: addingTo.agentId, data: { category: addingTo.category, title: key, content: '' } })
+        const agent = agents.find((a) => a.id === addingTo.agentId)
+        const org = orgs.find((o) => o.id === agent?.organizationId)
+        setSelectedFile({ type: 'knowledge', orgId: org?.id, orgName: org?.name, agentId: addingTo.agentId, agentName: agent?.name, key, value: '', category: addingTo.category })
+        break
+      }
+      case 'org-knowledge': {
+        saveOrgKb.mutate({ orgId: addingTo.orgId, data: { category: addingTo.category, title: key, content: '' } })
+        const org = orgs.find((o) => o.id === addingTo.orgId)
+        setSelectedFile({ type: 'org-knowledge', orgId: addingTo.orgId, orgName: org?.name, key, value: '', category: addingTo.category })
+        break
+      }
+      case 'tacit': {
+        saveTacit.mutate({ agentId: addingTo.agentId, data: { topic: key, insight: '', confidence: 0.5 } })
+        const agent = agents.find((a) => a.id === addingTo.agentId)
+        const org = orgs.find((o) => o.id === agent?.organizationId)
+        setSelectedFile({ type: 'tacit', orgId: org?.id, orgName: org?.name, agentId: addingTo.agentId, agentName: agent?.name, key, value: '', confidence: 0.5 })
+        break
+      }
     }
     setAddingTo(null)
   }
 
-  const isFileSelected = (type: string, id: string, key: string) =>
-    selectedFile?.type === type &&
-    (type === 'org-memory' ? selectedFile.orgId === id : selectedFile.agentId === id) &&
-    selectedFile.key === key
+  const isFileSelected = (type: string, id: string, key: string, entryId?: string) => {
+    if (entryId && selectedFile?.entryId) return selectedFile.entryId === entryId
+    return (
+      selectedFile?.type === type &&
+      (type === 'org-memory' || type === 'org-knowledge' ? selectedFile.orgId === id : selectedFile.agentId === id) &&
+      selectedFile.key === key
+    )
+  }
+
+  // ── Render Knowledge subfolder (for both org and agent) ──
+  const renderKbCategory = (
+    category: string,
+    entries: KnowledgeEntry[],
+    folderKey: string,
+    depth: number,
+    fileType: 'knowledge' | 'org-knowledge',
+    ownerId: string,
+    ownerName?: string,
+    orgId?: string,
+    orgName?: string,
+  ) => {
+    const catEntries = entries.filter((e) => e.category === category)
+    const isOrgKb = fileType === 'org-knowledge'
+    const addType = isOrgKb ? 'org-knowledge' : 'knowledge'
+
+    return (
+      <TreeFolder
+        key={category}
+        label={categoryLabel(category)}
+        isOpen={!!openFolders[folderKey]}
+        onToggle={() => toggleFolder(folderKey)}
+        onAdd={() => {
+          if (isOrgKb) {
+            setAddingTo({ type: 'org-knowledge', orgId: ownerId, category })
+          } else {
+            setAddingTo({ type: 'knowledge', agentId: ownerId, category })
+          }
+        }}
+        depth={depth}
+      >
+        {catEntries.map((entry) => (
+          <TreeFile
+            key={entry.id}
+            label={entry.title}
+            icon={<BookOpen size={13} className="text-blue-400/70 flex-shrink-0" />}
+            isSelected={isFileSelected(fileType, ownerId, entry.title, entry.id)}
+            onClick={() =>
+              setSelectedFile({
+                type: fileType,
+                orgId: isOrgKb ? ownerId : orgId,
+                orgName: isOrgKb ? ownerName : orgName,
+                agentId: isOrgKb ? undefined : ownerId,
+                agentName: isOrgKb ? undefined : ownerName,
+                key: entry.title,
+                value: entry.content,
+                updatedAt: entry.updatedAt,
+                entryId: entry.id,
+                category,
+              })
+            }
+            depth={depth + 1}
+          />
+        ))}
+        {openFolders[folderKey] && catEntries.length === 0 && !(addingTo && 'category' in addingTo && addingTo.category === category) && (
+          <div className="text-xs text-slate-600 italic px-2 py-1" style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
+            (empty)
+          </div>
+        )}
+        {addingTo &&
+          addingTo.type === addType &&
+          'category' in addingTo &&
+          addingTo.category === category &&
+          ((isOrgKb && 'orgId' in addingTo && addingTo.orgId === ownerId) ||
+           (!isOrgKb && 'agentId' in addingTo && addingTo.agentId === ownerId)) && (
+          <div style={{ paddingLeft: `${(depth + 1) * 16}px` }}>
+            <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} placeholder="entry_title" />
+          </div>
+        )}
+      </TreeFolder>
+    )
+  }
 
   // ── Render tree for a single organization ──
   const renderOrgTree = (org: Organization) => {
@@ -504,6 +927,7 @@ export default function Memory() {
     const kbKey = `org-${org.id}-kb`
     const orgAgents = agentsByOrg[org.id] || []
     const sharedEntries = orgMemoryMap[org.id] || []
+    const orgKbEntries = orgKbMap[org.id] || []
 
     return (
       <TreeFolder
@@ -515,66 +939,63 @@ export default function Memory() {
         depth={0}
       >
         {/* Shared Memory folder */}
-        <div className="group/shared relative">
-          <div className="flex items-center">
-            <div className="flex-1">
-              <TreeFolder
-                label="Shared Memory"
-                isOpen={!!openFolders[sharedKey]}
-                onToggle={() => toggleFolder(sharedKey)}
-                depth={1}
-              >
-                {sharedEntries.map((entry) => (
-                  <TreeFile
-                    key={entry.id}
-                    label={entry.key}
-                    isSelected={isFileSelected('org-memory', org.id, entry.key)}
-                    onClick={() =>
-                      setSelectedFile({
-                        type: 'org-memory',
-                        orgId: org.id,
-                        orgName: org.name,
-                        key: entry.key,
-                        value: entry.value,
-                        updatedAt: entry.updatedAt,
-                      })
-                    }
-                    depth={2}
-                  />
-                ))}
-                {openFolders[sharedKey] && sharedEntries.length === 0 && !addingTo && (
-                  <div
-                    className="text-xs text-slate-600 italic px-2 py-1"
-                    style={{ paddingLeft: `${2 * 16 + 8}px` }}
-                  >
-                    (empty)
-                  </div>
-                )}
-                {addingTo?.type === 'org' && addingTo.id === org.id && (
-                  <div style={{ paddingLeft: `${2 * 16}px` }}>
-                    <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} />
-                  </div>
-                )}
-              </TreeFolder>
+        <TreeFolder
+          label="Shared Memory"
+          isOpen={!!openFolders[sharedKey]}
+          onToggle={() => toggleFolder(sharedKey)}
+          onAdd={() => setAddingTo({ type: 'org', id: org.id })}
+          depth={1}
+        >
+          {sharedEntries.map((entry) => (
+            <TreeFile
+              key={entry.id}
+              label={entry.key}
+              isSelected={isFileSelected('org-memory', org.id, entry.key)}
+              onClick={() =>
+                setSelectedFile({
+                  type: 'org-memory',
+                  orgId: org.id,
+                  orgName: org.name,
+                  key: entry.key,
+                  value: entry.value,
+                  updatedAt: entry.updatedAt,
+                })
+              }
+              depth={2}
+            />
+          ))}
+          {openFolders[sharedKey] && sharedEntries.length === 0 && !(addingTo?.type === 'org' && addingTo.id === org.id) && (
+            <div className="text-xs text-slate-600 italic px-2 py-1" style={{ paddingLeft: `${2 * 16 + 8}px` }}>
+              (empty)
             </div>
-            {openFolders[sharedKey] && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setAddingTo({ type: 'org', id: org.id })
-                }}
-                className="opacity-0 group-hover/shared:opacity-100 p-0.5 mr-2 text-slate-500 hover:text-accent-purple transition-all"
-                title="Add new entry"
-              >
-                <Plus size={13} />
-              </button>
-            )}
-          </div>
-        </div>
+          )}
+          {addingTo?.type === 'org' && addingTo.id === org.id && (
+            <div style={{ paddingLeft: `${2 * 16}px` }}>
+              <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} />
+            </div>
+          )}
+        </TreeFolder>
 
-        {/* Knowledge Base placeholder */}
-        <TreePlaceholder label="Knowledge Base (coming soon)" depth={1} />
+        {/* Knowledge Base folder */}
+        <TreeFolder
+          label="Knowledge Base"
+          icon={<BookOpen size={14} className="text-blue-400/80 flex-shrink-0" />}
+          isOpen={!!openFolders[kbKey]}
+          onToggle={() => toggleFolder(kbKey)}
+          depth={1}
+        >
+          {KB_CATEGORIES.map((cat) =>
+            renderKbCategory(
+              cat,
+              orgKbEntries,
+              `org-${org.id}-kb-${cat}`,
+              2,
+              'org-knowledge',
+              org.id,
+              org.name,
+            )
+          )}
+        </TreeFolder>
 
         {/* Agent folders */}
         {orgAgents.map((agent) => renderAgentTree(agent, org))}
@@ -585,9 +1006,18 @@ export default function Memory() {
   const renderAgentTree = (agent: Agent, org?: Organization) => {
     const agentKey = `agent-${agent.id}`
     const memKey = `agent-${agent.id}-memory`
+    const dailyKey = `agent-${agent.id}-daily`
+    const kbKey = `agent-${agent.id}-kb`
+    const tacitKey = `agent-${agent.id}-tacit`
     const sysKey = `agent-${agent.id}-system`
+
     const agentEntries = agentMemoryMap[agent.id] || []
+    const dailyNotes = dailyNotesMap[agent.id] || []
+    const kbEntries = agentKbMap[agent.id] || []
+    const tacitEntries = tacitMap[agent.id] || []
     const systemPrompt = (agent.config?.systemPrompt as string) || ''
+
+    const baseDepth = org ? 1 : 0
 
     return (
       <TreeFolder
@@ -596,68 +1026,165 @@ export default function Memory() {
         icon={<Bot size={14} className="text-green-400/80 flex-shrink-0" />}
         isOpen={!!openFolders[agentKey]}
         onToggle={() => toggleFolder(agentKey)}
-        depth={org ? 1 : 0}
+        depth={baseDepth}
       >
         {/* Agent Memory folder */}
-        <div className="group/amem relative">
-          <div className="flex items-center">
-            <div className="flex-1">
-              <TreeFolder
-                label="Memory"
-                isOpen={!!openFolders[memKey]}
-                onToggle={() => toggleFolder(memKey)}
-                depth={org ? 2 : 1}
-              >
-                {agentEntries.map((entry) => (
-                  <TreeFile
-                    key={entry.id}
-                    label={entry.key}
-                    isSelected={isFileSelected('agent-memory', agent.id, entry.key)}
-                    onClick={() =>
-                      setSelectedFile({
-                        type: 'agent-memory',
-                        orgId: org?.id,
-                        orgName: org?.name,
-                        agentId: agent.id,
-                        agentName: agent.name,
-                        key: entry.key,
-                        value: entry.value,
-                        updatedAt: entry.updatedAt,
-                      })
-                    }
-                    depth={org ? 3 : 2}
-                  />
-                ))}
-                {openFolders[memKey] && agentEntries.length === 0 && !addingTo && (
-                  <div
-                    className="text-xs text-slate-600 italic px-2 py-1"
-                    style={{ paddingLeft: `${(org ? 3 : 2) * 16 + 8}px` }}
-                  >
-                    (empty)
-                  </div>
-                )}
-                {addingTo?.type === 'agent' && addingTo.id === agent.id && (
-                  <div style={{ paddingLeft: `${(org ? 3 : 2) * 16}px` }}>
-                    <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} />
-                  </div>
-                )}
-              </TreeFolder>
+        <TreeFolder
+          label="Memory"
+          icon={<Brain size={14} className="text-purple-400/80 flex-shrink-0" />}
+          isOpen={!!openFolders[memKey]}
+          onToggle={() => toggleFolder(memKey)}
+          onAdd={() => setAddingTo({ type: 'agent', id: agent.id })}
+          depth={baseDepth + 1}
+        >
+          {agentEntries.map((entry) => (
+            <TreeFile
+              key={entry.id}
+              label={entry.key}
+              isSelected={isFileSelected('agent-memory', agent.id, entry.key)}
+              onClick={() =>
+                setSelectedFile({
+                  type: 'agent-memory',
+                  orgId: org?.id,
+                  orgName: org?.name,
+                  agentId: agent.id,
+                  agentName: agent.name,
+                  key: entry.key,
+                  value: entry.value,
+                  updatedAt: entry.updatedAt,
+                })
+              }
+              depth={baseDepth + 2}
+            />
+          ))}
+          {openFolders[memKey] && agentEntries.length === 0 && !(addingTo?.type === 'agent' && addingTo.id === agent.id) && (
+            <div className="text-xs text-slate-600 italic px-2 py-1" style={{ paddingLeft: `${(baseDepth + 2) * 16 + 8}px` }}>
+              (empty)
             </div>
-            {openFolders[memKey] && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setAddingTo({ type: 'agent', id: agent.id })
-                }}
-                className="opacity-0 group-hover/amem:opacity-100 p-0.5 mr-2 text-slate-500 hover:text-accent-purple transition-all"
-                title="Add new entry"
-              >
-                <Plus size={13} />
-              </button>
-            )}
-          </div>
-        </div>
+          )}
+          {addingTo?.type === 'agent' && addingTo.id === agent.id && (
+            <div style={{ paddingLeft: `${(baseDepth + 2) * 16}px` }}>
+              <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} />
+            </div>
+          )}
+        </TreeFolder>
+
+        {/* Daily Notes folder */}
+        <TreeFolder
+          label="Daily Notes"
+          icon={<Calendar size={14} className="text-cyan-400/80 flex-shrink-0" />}
+          isOpen={!!openFolders[dailyKey]}
+          onToggle={() => toggleFolder(dailyKey)}
+          onAdd={() => setAddingTo({ type: 'daily-note', agentId: agent.id })}
+          depth={baseDepth + 1}
+        >
+          {dailyNotes
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .map((note) => (
+              <TreeFile
+                key={note.id}
+                label={note.date}
+                icon={<Calendar size={13} className="text-cyan-400/70 flex-shrink-0" />}
+                isSelected={isFileSelected('daily-note', agent.id, note.date, note.id)}
+                onClick={() =>
+                  setSelectedFile({
+                    type: 'daily-note',
+                    orgId: org?.id,
+                    orgName: org?.name,
+                    agentId: agent.id,
+                    agentName: agent.name,
+                    key: note.date,
+                    value: note.content,
+                    updatedAt: note.updatedAt,
+                    entryId: note.id,
+                  })
+                }
+                depth={baseDepth + 2}
+              />
+            ))}
+          {openFolders[dailyKey] && dailyNotes.length === 0 && !(addingTo?.type === 'daily-note' && addingTo.agentId === agent.id) && (
+            <div className="text-xs text-slate-600 italic px-2 py-1" style={{ paddingLeft: `${(baseDepth + 2) * 16 + 8}px` }}>
+              (empty)
+            </div>
+          )}
+          {addingTo?.type === 'daily-note' && addingTo.agentId === agent.id && (
+            <div style={{ paddingLeft: `${(baseDepth + 2) * 16}px` }}>
+              <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} placeholder="YYYY-MM-DD" />
+            </div>
+          )}
+        </TreeFolder>
+
+        {/* Knowledge folder */}
+        <TreeFolder
+          label="Knowledge"
+          icon={<BookOpen size={14} className="text-blue-400/80 flex-shrink-0" />}
+          isOpen={!!openFolders[kbKey]}
+          onToggle={() => toggleFolder(kbKey)}
+          depth={baseDepth + 1}
+        >
+          {KB_CATEGORIES.map((cat) =>
+            renderKbCategory(
+              cat,
+              kbEntries,
+              `agent-${agent.id}-kb-${cat}`,
+              baseDepth + 2,
+              'knowledge',
+              agent.id,
+              agent.name,
+              org?.id,
+              org?.name,
+            )
+          )}
+        </TreeFolder>
+
+        {/* Tacit Knowledge folder */}
+        <TreeFolder
+          label="Tacit Knowledge"
+          icon={<Lightbulb size={14} className="text-yellow-400/80 flex-shrink-0" />}
+          isOpen={!!openFolders[tacitKey]}
+          onToggle={() => toggleFolder(tacitKey)}
+          onAdd={() => setAddingTo({ type: 'tacit', agentId: agent.id })}
+          depth={baseDepth + 1}
+        >
+          {tacitEntries.map((entry) => (
+            <TreeFile
+              key={entry.id}
+              label={entry.topic}
+              icon={<Lightbulb size={13} className="text-yellow-400/70 flex-shrink-0" />}
+              isSelected={isFileSelected('tacit', agent.id, entry.topic, entry.id)}
+              badge={
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 flex-shrink-0">
+                  {Math.round(entry.confidence * 100)}%
+                </span>
+              }
+              onClick={() =>
+                setSelectedFile({
+                  type: 'tacit',
+                  orgId: org?.id,
+                  orgName: org?.name,
+                  agentId: agent.id,
+                  agentName: agent.name,
+                  key: entry.topic,
+                  value: entry.insight,
+                  updatedAt: entry.updatedAt,
+                  entryId: entry.id,
+                  confidence: entry.confidence,
+                })
+              }
+              depth={baseDepth + 2}
+            />
+          ))}
+          {openFolders[tacitKey] && tacitEntries.length === 0 && !(addingTo?.type === 'tacit' && addingTo.agentId === agent.id) && (
+            <div className="text-xs text-slate-600 italic px-2 py-1" style={{ paddingLeft: `${(baseDepth + 2) * 16 + 8}px` }}>
+              (empty)
+            </div>
+          )}
+          {addingTo?.type === 'tacit' && addingTo.agentId === agent.id && (
+            <div style={{ paddingLeft: `${(baseDepth + 2) * 16}px` }}>
+              <AddFileInline onAdd={handleAddFile} onCancel={() => setAddingTo(null)} placeholder="topic_name" />
+            </div>
+          )}
+        </TreeFolder>
 
         {/* System Prompt (read-only file) */}
         <TreeFolder
@@ -665,7 +1192,7 @@ export default function Memory() {
           icon={<BookOpen size={14} className="text-orange-400/80 flex-shrink-0" />}
           isOpen={!!openFolders[sysKey]}
           onToggle={() => toggleFolder(sysKey)}
-          depth={org ? 2 : 1}
+          depth={baseDepth + 1}
         >
           {systemPrompt ? (
             <TreeFile
@@ -683,12 +1210,12 @@ export default function Memory() {
                   readOnly: true,
                 })
               }
-              depth={org ? 3 : 2}
+              depth={baseDepth + 2}
             />
           ) : (
             <div
               className="text-xs text-slate-600 italic px-2 py-1"
-              style={{ paddingLeft: `${(org ? 3 : 2) * 16 + 8}px` }}
+              style={{ paddingLeft: `${(baseDepth + 2) * 16 + 8}px` }}
             >
               (not configured)
             </div>
@@ -717,7 +1244,7 @@ export default function Memory() {
       {/* Main layout: tree + viewer */}
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0">
         {/* Left Panel: Folder Tree */}
-        <div className="lg:w-[260px] flex-shrink-0 border border-dark-border rounded-xl bg-dark-card overflow-hidden flex flex-col">
+        <div className="lg:w-[280px] flex-shrink-0 border border-dark-border rounded-xl bg-dark-card overflow-hidden flex flex-col">
           <div className="px-3 py-2 border-b border-dark-border flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Explorer</span>
           </div>

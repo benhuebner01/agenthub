@@ -162,6 +162,40 @@ export const sharedMemory = sqliteTable('shared_memory', {
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 }, (t) => ({ unq: unique().on(t.organizationId, t.key) }));
 
+// Daily Notes — journal entries per agent, created each heartbeat/run
+export const dailyNotes = sqliteTable('daily_notes', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  date: text('date').notNull(), // YYYY-MM-DD
+  content: text('content').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// Knowledge Base — structured knowledge files per agent or org
+export const knowledgeBase = sqliteTable('knowledge_base', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  category: text('category').notNull(), // 'projects' | 'areas' | 'resources' | 'archives' (PARA)
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// Tacit Knowledge — accumulated operational wisdom per agent
+export const tacitKnowledge = sqliteTable('tacit_knowledge', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  topic: text('topic').notNull(),
+  insight: text('insight').notNull(),
+  confidence: real('confidence').default(0.5), // 0-1 confidence score
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 // API Keys — encrypted storage for provider keys (managed via UI)
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -242,6 +276,20 @@ export const proposalsRelations = relations(proposals, ({ one }) => ({
   proposedByAgent: one(agents, { fields: [proposals.proposedByAgentId], references: [agents.id] }),
 }));
 
+export const dailyNotesRelations = relations(dailyNotes, ({ one }) => ({
+  agent: one(agents, { fields: [dailyNotes.agentId], references: [agents.id] }),
+  organization: one(organizations, { fields: [dailyNotes.organizationId], references: [organizations.id] }),
+}));
+
+export const knowledgeBaseRelations = relations(knowledgeBase, ({ one }) => ({
+  agent: one(agents, { fields: [knowledgeBase.agentId], references: [agents.id] }),
+  organization: one(organizations, { fields: [knowledgeBase.organizationId], references: [organizations.id] }),
+}));
+
+export const tacitKnowledgeRelations = relations(tacitKnowledge, ({ one }) => ({
+  agent: one(agents, { fields: [tacitKnowledge.agentId], references: [agents.id] }),
+}));
+
 // Type exports
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
@@ -269,3 +317,9 @@ export type SharedMemory = typeof sharedMemory.$inferSelect;
 export type NewSharedMemory = typeof sharedMemory.$inferInsert;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
+export type DailyNote = typeof dailyNotes.$inferSelect;
+export type NewDailyNote = typeof dailyNotes.$inferInsert;
+export type KnowledgeBase = typeof knowledgeBase.$inferSelect;
+export type NewKnowledgeBase = typeof knowledgeBase.$inferInsert;
+export type TacitKnowledge = typeof tacitKnowledge.$inferSelect;
+export type NewTacitKnowledge = typeof tacitKnowledge.$inferInsert;

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { agents, organizations, proposals, runs, sharedMemory } from '../db/schema';
+import { agents, organizations, proposals, runs, sharedMemory, knowledgeBase, dailyNotes } from '../db/schema';
 import { eq, desc, and, gte, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { getApiKeyForProvider } from './settings';
@@ -275,6 +275,74 @@ Output ONLY valid JSON array, no markdown, no explanation.`;
   }
 }
 
+// ─── Auto-generate First-Run Knowledge ────────────────────────────────────────
+
+async function generateFirstRunKnowledge(orgId: string, org: any, ceoAgent: any, ceoOutput: string) {
+  try {
+    const goalsStr = Array.isArray(org.goals) ? (org.goals as string[]).join(', ') : String(org.goals || '');
+
+    const prompt = `You are setting up the knowledge base for an AI organization called "${org.name}".
+Industry: ${org.industry || 'General'}
+Description: ${org.description || 'N/A'}
+Goals: ${goalsStr}
+
+Based on this organization, generate 2-3 knowledge base entries about its core areas of responsibility.
+Each entry should use category "areas" (from the PARA method).
+
+Also generate a brief initial daily note for the CEO about their first analysis.
+
+Output ONLY valid JSON, no markdown:
+{
+  "knowledgeEntries": [
+    { "title": "string", "content": "string" }
+  ],
+  "ceoDailyNote": "string"
+}`;
+
+    const result = await callAI('You are a business knowledge setup assistant. Output only valid JSON.', prompt);
+
+    const cleaned = result.replace(/```json?\s*/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10); // YYYY-MM-DD
+
+    // Insert knowledge base entries for the org
+    if (Array.isArray(parsed.knowledgeEntries)) {
+      for (const entry of parsed.knowledgeEntries) {
+        if (entry.title && entry.content) {
+          await db.insert(knowledgeBase).values({
+            id: uuidv4(),
+            agentId: null,
+            organizationId: orgId,
+            category: 'areas',
+            title: String(entry.title).trim(),
+            content: String(entry.content).trim(),
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      console.log(`[Business] Auto-generated ${parsed.knowledgeEntries.length} knowledge entries for ${org.name}`);
+    }
+
+    // Insert initial daily note for the CEO
+    if (parsed.ceoDailyNote) {
+      await db.insert(dailyNotes).values({
+        id: uuidv4(),
+        agentId: ceoAgent.id,
+        organizationId: orgId,
+        date: today,
+        content: String(parsed.ceoDailyNote).trim(),
+        createdAt: now,
+        updatedAt: now,
+      });
+      console.log(`[Business] Auto-generated CEO daily note for ${org.name}`);
+    }
+  } catch (e: any) {
+    console.error('[Business] generateFirstRunKnowledge error:', e.message);
+  }
+}
+
 // ─── GET /api/business/organizations ─────────────────────────────────────────
 
 router.get('/organizations', async (req: Request, res: Response) => {
@@ -480,6 +548,13 @@ Analyze the situation and respond to: ${userInput || 'Please analyze our current
       }
     }
 
+    // On first run, auto-generate knowledge base entries and initial daily note
+    if (isFirstRun) {
+      generateFirstRunKnowledge(orgId, org, ceoAgent, ceoOutput).catch((e: any) =>
+        console.error('[Business] Auto-generate first-run knowledge failed (non-critical):', e.message)
+      );
+    }
+
     res.json({ data: { success: true, output: ceoOutput, tokensUsed: 0, costUsd: 0, promptsUpdated } });
   } catch (err: any) {
     console.error('[Business] POST /organizations/:id/ceo-run error:', err);
@@ -674,6 +749,135 @@ router.delete('/organizations/:id/memory/:key', async (req: Request, res: Respon
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to delete shared memory' });
+  }
+});
+
+// ─── Org-level Knowledge Base ─────────────────────────────────────────────────
+
+// GET /api/business/organizations/:id/knowledge — list org knowledge entries
+router.get('/organizations/:id/knowledge', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId));
+    if (!org) {
+      res.status(404).json({ error: 'Organization not found' });
+      return;
+    }
+
+    const entries = await db.select().from(knowledgeBase).where(eq(knowledgeBase.organizationId, orgId));
+    res.json({ data: entries, total: entries.length });
+  } catch (err: any) {
+    console.error('[Business] GET /organizations/:id/knowledge error:', err);
+    res.status(500).json({ error: 'Failed to fetch org knowledge entries' });
+  }
+});
+
+// POST /api/business/organizations/:id/knowledge — create org knowledge entry
+router.post('/organizations/:id/knowledge', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const { category, title, content } = req.body;
+
+    if (!category || !title || !content) {
+      res.status(400).json({ error: 'category, title, and content are required' });
+      return;
+    }
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId));
+    if (!org) {
+      res.status(404).json({ error: 'Organization not found' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const [created] = await db.insert(knowledgeBase).values({
+      id: uuidv4(),
+      agentId: null,
+      organizationId: orgId,
+      category,
+      title,
+      content,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+
+    res.status(201).json({ data: created });
+  } catch (err: any) {
+    console.error('[Business] POST /organizations/:id/knowledge error:', err);
+    res.status(500).json({ error: 'Failed to create org knowledge entry' });
+  }
+});
+
+// PUT /api/business/organizations/:id/knowledge/:kbId — update org knowledge entry
+router.put('/organizations/:id/knowledge/:kbId', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const kbId = req.params.kbId;
+    const { category, title, content } = req.body;
+
+    const [existing] = await db.select().from(knowledgeBase)
+      .where(and(eq(knowledgeBase.id, kbId), eq(knowledgeBase.organizationId, orgId)));
+
+    if (!existing) {
+      res.status(404).json({ error: 'Knowledge entry not found' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updateData: Record<string, any> = { updatedAt: now };
+    if (category !== undefined) updateData.category = category;
+    if (title !== undefined) updateData.title = title;
+    if (content !== undefined) updateData.content = content;
+
+    const [updated] = await db.update(knowledgeBase)
+      .set(updateData)
+      .where(eq(knowledgeBase.id, kbId))
+      .returning();
+
+    res.json({ data: updated });
+  } catch (err: any) {
+    console.error('[Business] PUT /organizations/:id/knowledge/:kbId error:', err);
+    res.status(500).json({ error: 'Failed to update org knowledge entry' });
+  }
+});
+
+// DELETE /api/business/organizations/:id/knowledge/:kbId — delete org knowledge entry
+router.delete('/organizations/:id/knowledge/:kbId', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const kbId = req.params.kbId;
+
+    const [existing] = await db.select().from(knowledgeBase)
+      .where(and(eq(knowledgeBase.id, kbId), eq(knowledgeBase.organizationId, orgId)));
+
+    if (!existing) {
+      res.status(404).json({ error: 'Knowledge entry not found' });
+      return;
+    }
+
+    await db.delete(knowledgeBase).where(eq(knowledgeBase.id, kbId));
+    res.json({ message: 'Knowledge entry deleted' });
+  } catch (err: any) {
+    console.error('[Business] DELETE /organizations/:id/knowledge/:kbId error:', err);
+    res.status(500).json({ error: 'Failed to delete org knowledge entry' });
+  }
+});
+
+// GET /api/business/organizations/:id/daily-notes — list all daily notes for org agents
+router.get('/organizations/:id/daily-notes', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId));
+    if (!org) {
+      res.status(404).json({ error: 'Organization not found' });
+      return;
+    }
+
+    const notes = await db.select().from(dailyNotes).where(eq(dailyNotes.organizationId, orgId));
+    res.json({ data: notes, total: notes.length });
+  } catch (err: any) {
+    console.error('[Business] GET /organizations/:id/daily-notes error:', err);
+    res.status(500).json({ error: 'Failed to fetch org daily notes' });
   }
 });
 

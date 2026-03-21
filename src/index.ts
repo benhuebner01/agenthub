@@ -266,6 +266,39 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
         CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
         CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
+        CREATE TABLE IF NOT EXISTS daily_notes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          date TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          agent_id UUID REFERENCES agents(id) ON DELETE CASCADE,
+          organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          category TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS tacit_knowledge (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          topic TEXT NOT NULL,
+          insight TEXT NOT NULL,
+          confidence NUMERIC(3,2) DEFAULT 0.5,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_notes_agent_id ON daily_notes(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_notes_organization_id ON daily_notes(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_agent_id ON knowledge_base(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_organization_id ON knowledge_base(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_tacit_knowledge_agent_id ON tacit_knowledge(agent_id);
       `);
 
       // Add new columns to agents if they don't exist
@@ -427,6 +460,39 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
         CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
         CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
+        CREATE TABLE IF NOT EXISTS daily_notes (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+          date TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+          organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+          category TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tacit_knowledge (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          topic TEXT NOT NULL,
+          insight TEXT NOT NULL,
+          confidence REAL DEFAULT 0.5,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_notes_agent_id ON daily_notes(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_notes_organization_id ON daily_notes(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_agent_id ON knowledge_base(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_organization_id ON knowledge_base(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_tacit_knowledge_agent_id ON tacit_knowledge(agent_id);
       `);
     } catch (migrateErr) {
       console.warn('[DB] Migration warning (tables may already exist):', (migrateErr as Error).message);
