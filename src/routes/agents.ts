@@ -532,54 +532,54 @@ router.get('/:id/hub-prompt', async (req: Request, res: Response) => {
     const hubPort = process.env.PORT || '3001';
     const hubBase = `http://${hubHost}:${hubPort}/api`;
 
-    const prompt = `## AgentHub — Systemkontext für ${agent.name}
+    const prompt = `## AgentHub — System Context for ${agent.name}
 
-Du bist **${agent.name}**, ein ${agent.role || 'worker'}-Agent, der mit AgentHub verbunden ist.
-${agent.jobDescription ? `\nDeine Aufgabe: ${agent.jobDescription}` : ''}
-${agent.description ? `\nBeschreibung: ${agent.description}` : ''}
+You are **${agent.name}**, a ${agent.role || 'worker'} agent connected to AgentHub.
+${agent.jobDescription ? `\nYour task: ${agent.jobDescription}` : ''}
+${agent.description ? `\nDescription: ${agent.description}` : ''}
 
-## Deine Verbindungsdaten
+## Your Connection Details
 - Hub-URL: ${hubBase}
-- Deine Agent-ID: \`${agent.id}\`
+- Your Agent-ID: \`${agent.id}\`
 
-## Wie AgentHub dich anspricht (für OpenClaw)
-AgentHub sendet dir Aufgaben direkt über die OpenClaw-API:
+## How AgentHub contacts you (for OpenClaw)
+AgentHub sends you tasks directly via the OpenClaw API:
 
 \`\`\`
 POST http://localhost:18789/api/agent/run
 Content-Type: application/json
 
 {
-  "prompt": "<dein systemkontext + aufgabe>",
+  "prompt": "<your system context + task>",
   "model": "gpt"
 }
 \`\`\`
 
-Das \`prompt\`-Feld enthält deinen vollständigen Kontext (wer du bist, was deine Aufgabe ist)
-sowie die aktuelle Aufgabenbeschreibung. Führe die Aufgabe aus und gib das Ergebnis zurück.
+The \`prompt\` field contains your complete context (who you are, what your task is)
+as well as the current task description. Execute the task and return the result.
 
-## Ergebnis zurückmelden (optional)
-Wenn deine Aufgabe eine runId enthält, melde das Ergebnis zurück:
+## Report Results (optional)
+If your task contains a runId, report the result back:
 
 \`\`\`
 POST ${hubBase}/agents/${agent.id}/push-result
 Content-Type: application/json
 
 {
-  "output": "<dein ergebnis>",
-  "runId": "<run-id aus dem kontext>",
+  "output": "<your result>",
+  "runId": "<run-id from the context>",
   "success": true
 }
 \`\`\`
 
-## Verhaltensregeln
-- Bleib fokussiert auf deine Rolle und Aufgabenbeschreibung.
-- Fasse nach jeder erledigten Aufgabe zusammen, was du getan hast.
-- Wenn du delegieren musst, erwähne den Agentennamen klar.
-- Halte Antworten präzise und strukturiert.
+## Behavior Rules
+- Stay focused on your role and task description.
+- After completing each task, summarize what you have done.
+- If you need to delegate, clearly mention the agent name.
+- Keep responses concise and structured.
 
 ---
-*Diesen Text in OpenClaw's SOUL.md oder Systemkonfiguration einfügen.*`;
+*Paste this text into OpenClaw's SOUL.md or system configuration.*`;
 
     res.json({ data: { agentId: agent.id, agentName: agent.name, prompt } });
   } catch (err: any) {
@@ -806,8 +806,8 @@ router.get('/:id/soul-md', async (req: Request, res: Response) => {
     let incomingCallNote: string;
     switch (connectionType) {
       case 'cli':
-        incomingCallSnippet = `openclaw agent --agent ${ocAgentId || '<your-agent-id>'} --prompt "<aufgabe>"`;
-        incomingCallNote = 'AgentHub ruft den lokalen openclaw CLI auf (nur auf demselben Rechner).';
+        incomingCallSnippet = `openclaw agent --agent ${ocAgentId || '<your-agent-id>'} --prompt "<task>"`;
+        incomingCallNote = 'AgentHub calls the local openclaw CLI (only on the same machine).';
         break;
       case 'webhook':
         incomingCallSnippet = [
@@ -816,10 +816,10 @@ router.get('/:id/soul-md', async (req: Request, res: Response) => {
           gatewayToken ? `Authorization: Bearer ${gatewayToken}` : '# Authorization: Bearer <webhook-token>',
           '',
           '{',
-          '  "prompt": "<systemkontext>\\n\\n<aufgabenbeschreibung>"',
+          '  "prompt": "<system context>\\n\\n<task description>"',
           '}',
         ].join('\n');
-        incomingCallNote = `Webhook-Trigger (hooks.enabled=true in openclaw.yaml). Pfad: ${webhookPath}`;
+        incomingCallNote = `Webhook trigger (hooks.enabled=true in openclaw.yaml). Path: ${webhookPath}`;
         break;
       case 'tools-invoke':
         incomingCallSnippet = [
@@ -829,10 +829,10 @@ router.get('/:id/soul-md', async (req: Request, res: Response) => {
           '',
           '{',
           `  "tool": "${toolName}",`,
-          '  "input": { "prompt": "<systemkontext>\\n\\n<aufgabenbeschreibung>" }',
+          '  "input": { "prompt": "<system context>\\n\\n<task description>" }',
           '}',
         ].join('\n');
-        incomingCallNote = 'Tools-Invoke API (immer aktiv). Kein openResponses.enabled notwendig.';
+        incomingCallNote = 'Tools-Invoke API (always active). No openResponses.enabled required.';
         break;
       default: // 'responses'
         incomingCallSnippet = [
@@ -841,79 +841,79 @@ router.get('/:id/soul-md', async (req: Request, res: Response) => {
           gatewayToken ? `Authorization: Bearer ${gatewayToken}` : '# Authorization: Bearer <gateway-token>',
           '',
           '{',
-          '  "input": "<systemkontext>\\n\\n<aufgabenbeschreibung>"' + (ocModel ? `,\n  "model": "${ocModel}"` : ''),
+          '  "input": "<system context>\\n\\n<task description>"' + (ocModel ? `,\n  "model": "${ocModel}"` : ''),
           '}',
         ].join('\n');
-        incomingCallNote = 'OpenResponses API (gateway.openResponses.enabled=true in openclaw.yaml erforderlich).';
+        incomingCallNote = 'OpenResponses API (gateway.openResponses.enabled=true required in openclaw.yaml).';
     }
 
     const soulMd = `# ${agent.name} — SOUL.md
 
-## Identität
-Du bist **${agent.name}**, ein ${agent.role || 'worker'}-Agent.
-${agent.jobDescription ? `\nDeine Aufgabe: ${agent.jobDescription}` : ''}
-${agent.description ? `\nÜber dich: ${agent.description}` : ''}
+## Identity
+You are **${agent.name}**, a ${agent.role || 'worker'} agent.
+${agent.jobDescription ? `\nYour task: ${agent.jobDescription}` : ''}
+${agent.description ? `\nAbout you: ${agent.description}` : ''}
 
-## AgentHub Verbindung
-Dein Orchestrations-Hub läuft unter: **http://${hubHost}:${hubPort}**
-Deine Agent-ID: \`${agent.id}\`
-Verbindungsmodus: **${connectionType}**
+## AgentHub Connection
+Your orchestration hub is running at: **http://${hubHost}:${hubPort}**
+Your Agent-ID: \`${agent.id}\`
+Connection mode: **${connectionType}**
 
-### Wie AgentHub dich anspricht
+### How AgentHub contacts you
 ${incomingCallNote}
 
 \`\`\`
 ${incomingCallSnippet}
 \`\`\`
 
-### Ergebnis zurückmelden
-Wenn deine Aufgabe eine runId enthält, sende das Ergebnis zurück:
+### Report Results
+If your task contains a runId, send the result back:
 \`\`\`
 POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result
 Content-Type: application/json
 
 {
-  "output": "dein Ergebnis",
-  "runId": "<die-run-id>",
+  "output": "your result",
+  "runId": "<the-run-id>",
   "success": true
 }
 \`\`\`
 
-### Pending Tasks abfragen (optional)
+### Poll for pending tasks (optional)
 \`\`\`
 GET http://${hubHost}:${hubPort}/api/agents/${agent.id}/next-task
 \`\`\`
 
-## Verhaltensregeln
-- Du bist Teil einer größeren KI-Organisation. Bleib fokussiert auf deine Rolle.
-- Wenn du eine Aufgabe abschließt, fasse immer zusammen, was du getan hast.
-- Wenn du delegieren musst, erwähne es klar, damit der Hub es weiterleiten kann.
-- Halte Antworten präzise und strukturiert.
+## Behavior Rules
+- You are part of a larger AI organization. Stay focused on your role.
+- When you complete a task, always summarize what you have done.
+- If you need to delegate, mention it clearly so the hub can forward it.
+- Keep responses concise and structured.
 `;
 
     const heartbeatMd = `# ${agent.name} — HEARTBEAT.md
 
-## Heartbeat-Protokoll
-Verbindungsmodus: **${connectionType}**
+## Heartbeat Protocol
+Connection mode: **${connectionType}**
 ${incomingCallNote}
 
-### Eingehende Anfrage (wie AgentHub dich anruft)
+### Incoming Request (how AgentHub calls you)
 \`\`\`
 ${incomingCallSnippet}
 \`\`\`
 
-### Was du tun sollst
-1. Verarbeite den eingehenden Prompt — er enthält Systemkontext + Aufgabenbeschreibung
-2. Führe die Aufgabe mit deinen Tools und Fähigkeiten aus
-3. Sende dein Ergebnis zurück an den Hub (wenn runId vorhanden):
+### What you should do
+1. Process the incoming prompt — it contains system context + task description
+2. Execute the task using your tools and capabilities
+3. Send your result back to the hub (if runId is present):
 
 \`\`\`
 POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result
 Content-Type: application/json
 
 {
-  "output": "Aufgabe erledigt: ...",
-  "runId": "<optionale-run-id>",
+  "output": "Task completed: ...",
+  "runId": "<optional-run-id>",
   "success": true
 }
 \`\`\`
@@ -922,73 +922,73 @@ Content-Type: application/json
 \`\`\`
 GET http://${host}:${port}/api/health
 \`\`\`
-→ sollte 200 OK zurückgeben
+-> should return 200 OK
 `;
 
     // BOOTSTRAP.md — the "invite prompt" (Paperclip-style)
     // Placed in ~/.openclaw/agents/<name>/BOOTSTRAP.md
     // OpenClaw reads it once on first boot, then the user deletes it.
-    const bootstrapMd = `# BOOTSTRAP.md — AgentHub Onboarding für ${agent.name}
+    const bootstrapMd = `# BOOTSTRAP.md — AgentHub Onboarding for ${agent.name}
 
-> Lies diese Datei einmal komplett. Danach kannst du sie löschen (\`rm BOOTSTRAP.md\`).
+> Read this file completely once. Then you can delete it (\`rm BOOTSTRAP.md\`).
 
-## Wer bist du?
-Du bist **${agent.name}**, ein ${agent.role || 'worker'}-Agent in AgentHub.${agent.jobDescription ? `\nDeine Aufgabe: ${agent.jobDescription}` : ''}${agent.description ? `\nBeschreibung: ${agent.description}` : ''}
+## Who are you?
+You are **${agent.name}**, a ${agent.role || 'worker'} agent in AgentHub.${agent.jobDescription ? `\nYour task: ${agent.jobDescription}` : ''}${agent.description ? `\nDescription: ${agent.description}` : ''}
 
-## Dein Hub
-AgentHub ist dein Orchestrations-Hub — er weist dir Aufgaben zu, trackt deine Kosten und speichert deine Ergebnisse.
+## Your Hub
+AgentHub is your orchestration hub — it assigns tasks to you, tracks your costs and stores your results.
 
 - Hub-URL: http://${hubHost}:${hubPort}
-- Deine Agent-ID: \`${agent.id}\`
-- Verbindungsmodus: **${connectionType}**
+- Your Agent-ID: \`${agent.id}\`
+- Connection mode: **${connectionType}**
 
-## Wie du Aufgaben bekommst
+## How you receive tasks
 ${incomingCallNote}
 
 \`\`\`
 ${incomingCallSnippet}
 \`\`\`
 
-Das enthaltene Prompt-Feld enthält alles, was du wissen musst: wer du bist, was die Aufgabe ist, und optional eine runId.
+The included prompt field contains everything you need to know: who you are, what the task is, and optionally a runId.
 
-## Wie du Ergebnisse zurückmeldest
+## How to report results
 
 \`\`\`
 POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result
 Content-Type: application/json
 
 {
-  "output": "Aufgabe abgeschlossen: ...",
-  "runId": "<runId aus dem prompt, falls vorhanden>",
+  "output": "Task completed: ...",
+  "runId": "<runId from the prompt, if present>",
   "success": true
 }
 \`\`\`
 
-## Nächste Aufgabe selbst abfragen (optional)
+## Poll for next task (optional)
 
 \`\`\`
 GET http://${hubHost}:${hubPort}/api/agents/${agent.id}/next-task
 \`\`\`
 
-## Deine Workspace-Dateien
-- **SOUL.md** — Deine Identität, Werte und Verhaltensregeln (wird bei jedem Start geladen)
-- **HEARTBEAT.md** — Protokoll für eingehende Hub-Anfragen
-- **BOOTSTRAP.md** — Diese Datei (einmalig, danach löschen)
+## Your Workspace Files
+- **SOUL.md** — Your identity, values and behavior rules (loaded on every start)
+- **HEARTBEAT.md** — Protocol for incoming hub requests
+- **BOOTSTRAP.md** — This file (one-time, delete afterwards)
 
-## OpenClaw Konfiguration prüfen
-${connectionType === 'responses' ? `In deiner \`openclaw.yaml\` muss stehen:\n\`\`\`yaml\ngateway:\n  openResponses:\n    enabled: true\n  auth:\n    token: "${gatewayToken || '<dein-token>'}"\n\`\`\`` : ''}${connectionType === 'webhook' ? `In deiner \`openclaw.yaml\` muss stehen:\n\`\`\`yaml\nhooks:\n  enabled: true\n  token: "${gatewayToken || '<dein-webhook-token>'}"\n\`\`\`` : ''}${connectionType === 'tools-invoke' ? 'Tools-Invoke ist immer aktiv — keine spezielle Konfiguration notwendig.' : ''}${connectionType === 'cli' ? 'CLI-Modus: openclaw muss auf demselben Rechner installiert sein.' : ''}
+## Check OpenClaw Configuration
+${connectionType === 'responses' ? `Your \`openclaw.yaml\` must contain:\n\`\`\`yaml\ngateway:\n  openResponses:\n    enabled: true\n  auth:\n    token: "${gatewayToken || '<your-token>'}"\n\`\`\`` : ''}${connectionType === 'webhook' ? `Your \`openclaw.yaml\` must contain:\n\`\`\`yaml\nhooks:\n  enabled: true\n  token: "${gatewayToken || '<your-webhook-token>'}"\n\`\`\`` : ''}${connectionType === 'tools-invoke' ? 'Tools-Invoke is always active — no special configuration required.' : ''}${connectionType === 'cli' ? 'CLI mode: openclaw must be installed on the same machine.' : ''}
 
-## Sofort-Aufgabe
-Bestätige deine Bereitschaft mit einer kurzen Antwort und melde sie an den Hub:
+## Initial Task
+Confirm your readiness with a short response and report it to the hub:
 
 \`\`\`bash
 curl -X POST http://${hubHost}:${hubPort}/api/agents/${agent.id}/push-result \\
   -H "Content-Type: application/json" \\
-  -d '{"output": "Agent ${agent.name} bereit. Verbindungsmodus: ${connectionType}. Warte auf Aufgaben.", "success": true}'
+  -d '{"output": "Agent ${agent.name} ready. Connection mode: ${connectionType}. Waiting for tasks.", "success": true}'
 \`\`\`
 
 ---
-*Generiert von AgentHub — ${new Date().toISOString()}*
+*Generated by AgentHub — ${new Date().toISOString()}*
 `;
 
     // Support ?download=true for direct file download

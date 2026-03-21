@@ -49,8 +49,8 @@ const LABEL_CLASS = 'block text-xs font-medium text-slate-400 mb-1.5'
 type PresetCategory = 'local' | 'ai-api' | 'http' | 'automation' | 'mcp' | 'bash'
 
 const CATEGORY_META: Record<PresetCategory, { label: string; icon: string; description: string }> = {
-  local:      { label: 'Local Agents',        icon: '🖥️', description: 'CLI tools running on this machine' },
-  'ai-api':   { label: 'AI APIs',              icon: '🧠', description: 'Cloud AI providers via API' },
+  local:      { label: 'Coding Agents',        icon: '🖥️', description: 'CLI tools running on this machine' },
+  'ai-api':   { label: 'Internal Agents',      icon: '🧠', description: 'Cloud AI providers via API' },
   http:       { label: 'HTTP & Protocols',     icon: '🌐', description: 'Webhooks, REST APIs, A2A protocol' },
   automation: { label: 'Automation Platforms', icon: '⚙️', description: 'n8n, Zapier, Make and similar' },
   mcp:        { label: 'MCP Servers',          icon: '🔌', description: 'Model Context Protocol tools' },
@@ -97,8 +97,8 @@ interface TypeOption {
 
 const TYPE_OPTIONS: TypeOption[] = [
   // Local
-  { value: 'claude-code',  icon: '🤖', label: 'Claude Code CLI',  desc: 'Claude Code on this machine', category: 'local' },
-  { value: 'openai-codex', icon: '⚡', label: 'Codex CLI',        desc: 'OpenAI Codex on this machine', category: 'local' },
+  { value: 'claude-code',  icon: '🤖', label: 'Claude Code',       desc: 'Anthropic Claude Code agent', category: 'local' },
+  { value: 'openai-codex', icon: '⚡', label: 'Codex',            desc: 'OpenAI Codex agent', category: 'local' },
   { value: 'openclaw',     icon: '🦞', label: 'OpenClaw',         desc: 'OpenClaw agent', category: 'local' },
   { value: 'cursor',       icon: '🖱️', label: 'Cursor IDE',       desc: 'Cursor in headless mode', category: 'local' },
   // AI APIs
@@ -670,6 +670,8 @@ function ClaudeConfig({
   const [showApiKey, setShowApiKey] = useState(false)
   const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [keyMsg, setKeyMsg] = useState('')
+  const [showSystemPrompt, setShowSystemPrompt] = useState(!!systemPrompt)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const handleModelChange = (newModel: string) => {
     setModel(newModel)
@@ -708,65 +710,70 @@ function ClaudeConfig({
         </select>
       </div>
       <div>
-        <label className={LABEL_CLASS}>System Prompt</label>
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={4}
-          className={INPUT_CLASS + ' resize-y'}
-          placeholder="You are a helpful assistant..."
-        />
-      </div>
-      <div>
-        <label className={LABEL_CLASS}>Max Tokens</label>
-        <input
-          type="number"
-          value={maxTokens}
-          onChange={(e) => setMaxTokens(e.target.value)}
-          min={1}
-          max={spec?.maxOutput || 200000}
-          className={INPUT_CLASS}
-        />
-        {spec && (
-          <p className="text-xs text-slate-500 mt-1">
-            Context: {formatK(spec.contextWindow)} | Max output: {formatK(spec.maxOutput)} | Using: {formatK(parseInt(maxTokens) || 0)} (80% recommended)
-          </p>
+        <button
+          type="button"
+          onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mb-1.5"
+        >
+          <ChevronRight className={`w-3 h-3 transition-transform ${showSystemPrompt ? 'rotate-90' : ''}`} />
+          System Prompt (optional)
+        </button>
+        {showSystemPrompt && (
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={3}
+            className={INPUT_CLASS + ' resize-y'}
+            placeholder="You are a helpful assistant..."
+          />
         )}
       </div>
 
-      {/* ── API Key + Test ── */}
-      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+      {/* ── Advanced Settings ── */}
+      <div>
         <button
           type="button"
-          onClick={() => setShowApiKey(!showApiKey)}
-          className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
         >
-          <Key className="w-3.5 h-3.5" />
-          <ChevronRight className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`} />
-          API Key Override (optional)
+          <ChevronRight className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
+          Advanced Settings
         </button>
-        {showApiKey && (
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-ant-... (uses ANTHROPIC_API_KEY env var if empty)"
-            className={INPUT_CLASS}
-          />
+        {showAdvanced && (
+          <div className="mt-2 border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+            <button
+              type="button"
+              onClick={() => setShowApiKey(!showApiKey)}
+              className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <ChevronRight className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`} />
+              API Key Override (optional)
+            </button>
+            {showApiKey && (
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-ant-... (uses ANTHROPIC_API_KEY env var if empty)"
+                className={INPUT_CLASS}
+              />
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTestKey}
+                disabled={keyStatus === 'testing'}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {keyStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                Test API Key
+              </button>
+              {keyStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+              {keyStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+            </div>
+          </div>
         )}
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleTestKey}
-            disabled={keyStatus === 'testing'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {keyStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
-            Test API Key
-          </button>
-          {keyStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
-          {keyStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
-        </div>
       </div>
     </div>
   )
@@ -793,6 +800,8 @@ function OpenAIConfig({
   const [showApiKey, setShowApiKey] = useState(false)
   const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [keyMsg, setKeyMsg] = useState('')
+  const [showOSystemPrompt, setShowOSystemPrompt] = useState(!!systemPrompt)
+  const [showOAdvanced, setShowOAdvanced] = useState(false)
 
   const handleModelChange = (newModel: string) => {
     setModel(newModel)
@@ -840,65 +849,70 @@ function OpenAIConfig({
         </select>
       </div>
       <div>
-        <label className={LABEL_CLASS}>System Prompt</label>
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={4}
-          className={INPUT_CLASS + ' resize-y'}
-          placeholder="You are a helpful assistant..."
-        />
-      </div>
-      <div>
-        <label className={LABEL_CLASS}>Max Tokens</label>
-        <input
-          type="number"
-          value={maxTokens}
-          onChange={(e) => setMaxTokens(e.target.value)}
-          min={1}
-          max={oSpec?.maxOutput || 128000}
-          className={INPUT_CLASS}
-        />
-        {oSpec && (
-          <p className="text-xs text-slate-500 mt-1">
-            Context: {formatK(oSpec.contextWindow)} | Max output: {formatK(oSpec.maxOutput)} | Using: {formatK(parseInt(maxTokens) || 0)} (80% recommended)
-          </p>
+        <button
+          type="button"
+          onClick={() => setShowOSystemPrompt(!showOSystemPrompt)}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mb-1.5"
+        >
+          <ChevronRight className={`w-3 h-3 transition-transform ${showOSystemPrompt ? 'rotate-90' : ''}`} />
+          System Prompt (optional)
+        </button>
+        {showOSystemPrompt && (
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={3}
+            className={INPUT_CLASS + ' resize-y'}
+            placeholder="You are a helpful assistant..."
+          />
         )}
       </div>
 
-      {/* ── API Key + Test ── */}
-      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+      {/* ── Advanced Settings ── */}
+      <div>
         <button
           type="button"
-          onClick={() => setShowApiKey(!showApiKey)}
-          className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors"
+          onClick={() => setShowOAdvanced(!showOAdvanced)}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
         >
-          <Key className="w-3.5 h-3.5" />
-          <ChevronRight className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`} />
-          API Key Override (optional)
+          <ChevronRight className={`w-3 h-3 transition-transform ${showOAdvanced ? 'rotate-90' : ''}`} />
+          Advanced Settings
         </button>
-        {showApiKey && (
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-... (uses OPENAI_API_KEY env var if empty)"
-            className={INPUT_CLASS}
-          />
+        {showOAdvanced && (
+          <div className="mt-2 border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+            <button
+              type="button"
+              onClick={() => setShowApiKey(!showApiKey)}
+              className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <ChevronRight className={`w-3 h-3 transition-transform ${showApiKey ? 'rotate-90' : ''}`} />
+              API Key Override (optional)
+            </button>
+            {showApiKey && (
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-... (uses OPENAI_API_KEY env var if empty)"
+                className={INPUT_CLASS}
+              />
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTestKey}
+                disabled={keyStatus === 'testing'}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {keyStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                Test API Key
+              </button>
+              {keyStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+              {keyStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
+            </div>
+          </div>
         )}
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleTestKey}
-            disabled={keyStatus === 'testing'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {keyStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
-            Test API Key
-          </button>
-          {keyStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
-          {keyStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{keyMsg}</span>}
-        </div>
       </div>
     </div>
   )
@@ -915,6 +929,7 @@ function InternalConfig({
 }) {
   const [provider, setProvider] = useState((config.provider as string) || 'auto')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
+  const [showSysPrompt, setShowSysPrompt] = useState(!!systemPrompt)
 
   useEffect(() => {
     const c: Record<string, unknown> = { systemPrompt }
@@ -950,14 +965,23 @@ function InternalConfig({
         <span className="text-xs text-slate-400 font-mono">{modelLabel}</span>
       </div>
       <div>
-        <label className={LABEL_CLASS}>System Prompt</label>
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={3}
-          className={INPUT_CLASS + ' resize-y'}
-          placeholder="You are a helpful assistant..."
-        />
+        <button
+          type="button"
+          onClick={() => setShowSysPrompt(!showSysPrompt)}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mb-1.5"
+        >
+          <ChevronRight className={`w-3 h-3 transition-transform ${showSysPrompt ? 'rotate-90' : ''}`} />
+          System Prompt (optional)
+        </button>
+        {showSysPrompt && (
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={3}
+            className={INPUT_CLASS + ' resize-y'}
+            placeholder="You are a helpful assistant..."
+          />
+        )}
       </div>
     </div>
   )
@@ -1043,7 +1067,14 @@ function BashConfig({
   )
 }
 
-// ─── Claude Code CLI Config ───────────────────────────────────────────────────
+// ─── Claude Code Config ──────────────────────────────────────────────────────
+
+type CcConnectionType = 'local-cli' | 'remote-connector' | 'api'
+const CC_CONNECTION_OPTIONS: { value: CcConnectionType; label: string; desc: string }[] = [
+  { value: 'local-cli',        label: 'Local CLI',          desc: 'Run Claude Code directly on this machine via CLI' },
+  { value: 'remote-connector', label: 'Remote Connector',   desc: 'Run on a remote machine via polling connector script' },
+  { value: 'api',              label: 'API (Direct)',       desc: 'Call Claude API directly without CLI — fastest, no install needed' },
+]
 
 function ClaudeCodeConfig({
   config,
@@ -1054,6 +1085,9 @@ function ClaudeCodeConfig({
   onChange: (c: Record<string, unknown>) => void
   agentId?: string
 }) {
+  const [connectionType, setConnectionType] = useState<CcConnectionType>(
+    (config.connectionType as CcConnectionType) || 'local-cli'
+  )
   const [model, setModel] = useState((config.model as string) || 'claude-sonnet-4-6')
   const [systemPrompt, setSystemPrompt] = useState((config.systemPrompt as string) || '')
   const [maxTurns, setMaxTurns] = useState(String((config.maxTurns as number) || 5))
@@ -1066,11 +1100,12 @@ function ClaudeCodeConfig({
   const [cliMsg, setCliMsg] = useState('')
 
   useEffect(() => {
-    const c: Record<string, unknown> = { model, maxTurns: parseInt(maxTurns) || 5, workDir }
+    const c: Record<string, unknown> = { connectionType, model, maxTurns: parseInt(maxTurns) || 5 }
+    if (connectionType !== 'api') c.workDir = workDir
     if (systemPrompt) c.systemPrompt = systemPrompt
     if (tools) c.tools = tools
     onChange(c)
-  }, [model, systemPrompt, maxTurns, workDir, tools])
+  }, [connectionType, model, systemPrompt, maxTurns, workDir, tools])
 
   const handleCheckCli = async () => {
     setCliStatus('checking')
@@ -1084,29 +1119,54 @@ function ClaudeCodeConfig({
 
   return (
     <div className="space-y-3">
-      {/* ── CLI Check ── */}
-      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
-        <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-          <Terminal className="w-3.5 h-3.5" />
-          Installation Check
-        </p>
-        <p className="text-xs text-slate-500">
-          Install: <code className="font-mono bg-white/10 px-1 rounded">npm install -g @anthropic-ai/claude-code</code>
-        </p>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleCheckCli}
-            disabled={cliStatus === 'checking'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
-            Check claude CLI
-          </button>
-          {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
-          {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+      {/* ── Connection Type ── */}
+      <div>
+        <label className={LABEL_CLASS}>Connection Mode</label>
+        <div className="grid grid-cols-3 gap-2">
+          {CC_CONNECTION_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setConnectionType(opt.value)}
+              className={`p-2.5 rounded-lg border text-left transition-colors ${
+                connectionType === opt.value
+                  ? 'border-accent-purple/60 bg-accent-purple/10 text-slate-200'
+                  : 'border-dark-border text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <p className="text-xs font-semibold">{opt.label}</p>
+              <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">{opt.desc}</p>
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* ── CLI Check (only for local-cli) ── */}
+      {connectionType === 'local-cli' && (
+        <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+          <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+            <Terminal className="w-3.5 h-3.5" />
+            Installation Check
+          </p>
+          <p className="text-xs text-slate-500">
+            Install: <code className="font-mono bg-white/10 px-1 rounded">npm install -g @anthropic-ai/claude-code</code>
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleCheckCli}
+              disabled={cliStatus === 'checking'}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
+              Check claude CLI
+            </button>
+            {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+            {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+          </div>
+        </div>
+      )}
+
       <div>
         <label className={LABEL_CLASS}>Model</label>
         <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
@@ -1137,16 +1197,18 @@ function ClaudeCodeConfig({
             className={INPUT_CLASS}
           />
         </div>
-        <div>
-          <label className={LABEL_CLASS}>Working Directory</label>
-          <input
-            type="text"
-            value={workDir}
-            onChange={(e) => setWorkDir(e.target.value)}
-            placeholder="/tmp"
-            className={INPUT_CLASS + ' font-mono text-xs'}
-          />
-        </div>
+        {connectionType !== 'api' && (
+          <div>
+            <label className={LABEL_CLASS}>Working Directory</label>
+            <input
+              type="text"
+              value={workDir}
+              onChange={(e) => setWorkDir(e.target.value)}
+              placeholder="/tmp"
+              className={INPUT_CLASS + ' font-mono text-xs'}
+            />
+          </div>
+        )}
       </div>
       <div>
         <label className={LABEL_CLASS}>Allowed Tools (optional)</label>
@@ -1159,61 +1221,80 @@ function ClaudeCodeConfig({
         />
       </div>
 
-      {/* Remote Connector Script */}
-      <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-300">Remote Machine Connector</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Run Claude Code on another machine. Script polls AgentHub for tasks and executes them locally.
-            </p>
-          </div>
-          {agentId && (
-            <button
-              type="button"
-              onClick={async () => {
-                setScriptLoading(true)
-                try {
-                  const r = await getAgentConnectorScript(agentId)
-                  setScript(r.data.script)
-                } catch { /* ignore */ }
-                finally { setScriptLoading(false) }
-              }}
-              disabled={scriptLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
-            >
-              {scriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-              Generate Script
-            </button>
-          )}
-          {!agentId && <span className="text-xs text-slate-600 italic">Save agent first</span>}
-        </div>
-        {script && (
-          <div className="space-y-2">
-            <div className="relative">
-              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono whitespace-pre-wrap">
-                {script}
-              </pre>
+      {/* Remote Connector Script (only for remote-connector mode) */}
+      {connectionType === 'remote-connector' && (
+        <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-300">Remote Machine Connector</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Run Claude Code on another machine. Script polls AgentHub for tasks and executes them locally.
+              </p>
+            </div>
+            {agentId && (
               <button
                 type="button"
-                onClick={() => { navigator.clipboard.writeText(script); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 1500) }}
-                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+                onClick={async () => {
+                  setScriptLoading(true)
+                  try {
+                    const r = await getAgentConnectorScript(agentId)
+                    setScript(r.data.script)
+                  } catch { /* ignore */ }
+                  finally { setScriptLoading(false) }
+                }}
+                disabled={scriptLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
               >
-                <Copy className="w-3 h-3" />
-                {scriptCopied ? 'Copied!' : 'Copy'}
+                {scriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                Generate Script
               </button>
-            </div>
-            <p className="text-xs text-slate-600">
-              On the remote machine: <code className="font-mono">chmod +x connector.sh && HUB_API_KEY=your-key ./connector.sh</code>
-            </p>
+            )}
+            {!agentId && <span className="text-xs text-slate-600 italic">Save agent first</span>}
           </div>
-        )}
-      </div>
+          {script && (
+            <div className="space-y-2">
+              <div className="relative">
+                <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono whitespace-pre-wrap">
+                  {script}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => { navigator.clipboard.writeText(script); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 1500) }}
+                  className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  {scriptCopied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-600">
+                On the remote machine: <code className="font-mono">chmod +x connector.sh && HUB_API_KEY=your-key ./connector.sh</code>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* API mode info */}
+      {connectionType === 'api' && (
+        <div className="border border-dark-border rounded-xl p-3 bg-dark-bg/50">
+          <p className="text-xs text-slate-400">
+            API mode calls Claude directly via the Anthropic API. No CLI installation needed.
+            Make sure an Anthropic API key is configured in <strong className="text-slate-300">Settings &gt; API Keys</strong>.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
 
-// ─── OpenAI Codex CLI Config ──────────────────────────────────────────────────
+// ─── OpenAI Codex Config ─────────────────────────────────────────────────────
+
+type CxConnectionType = 'local-cli' | 'remote-connector' | 'api'
+const CX_CONNECTION_OPTIONS: { value: CxConnectionType; label: string; desc: string }[] = [
+  { value: 'local-cli',        label: 'Local CLI',          desc: 'Run Codex directly on this machine via CLI' },
+  { value: 'remote-connector', label: 'Remote Connector',   desc: 'Run on a remote machine via polling connector script' },
+  { value: 'api',              label: 'API (Direct)',       desc: 'Call OpenAI API directly without CLI — fastest, no install needed' },
+]
 
 function OpenAICodexConfig({
   config,
@@ -1224,6 +1305,9 @@ function OpenAICodexConfig({
   onChange: (c: Record<string, unknown>) => void
   agentId?: string
 }) {
+  const [connectionType, setConnectionType] = useState<CxConnectionType>(
+    (config.connectionType as CxConnectionType) || 'local-cli'
+  )
   const [mode, setMode] = useState((config.mode as string) || 'full-auto')
   const [workDir, setWorkDir] = useState((config.workDir as string) || '/tmp')
   const [apiKey, setApiKey] = useState((config.apiKeyOverride as string) || '')
@@ -1234,10 +1318,11 @@ function OpenAICodexConfig({
   const [scriptCopied, setScriptCopied] = useState(false)
 
   useEffect(() => {
-    const c: Record<string, unknown> = { mode, workDir }
+    const c: Record<string, unknown> = { connectionType, mode }
+    if (connectionType !== 'api') c.workDir = workDir
     if (apiKey) c.apiKeyOverride = apiKey
     onChange(c)
-  }, [mode, workDir, apiKey])
+  }, [connectionType, mode, workDir, apiKey])
 
   const handleCheckCli = async () => {
     setCliStatus('checking')
@@ -1251,48 +1336,76 @@ function OpenAICodexConfig({
 
   return (
     <div className="space-y-3">
-      {/* ── CLI Check ── */}
-      <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
-        <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-          <Terminal className="w-3.5 h-3.5" />
-          Installation Check
-        </p>
-        <p className="text-xs text-slate-500">
-          Install: <code className="font-mono bg-white/10 px-1 rounded">npm install -g @openai/codex</code>
-        </p>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleCheckCli}
-            disabled={cliStatus === 'checking'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
-            Check codex CLI
-          </button>
-          {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
-          {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+      {/* ── Connection Type ── */}
+      <div>
+        <label className={LABEL_CLASS}>Connection Mode</label>
+        <div className="grid grid-cols-3 gap-2">
+          {CX_CONNECTION_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setConnectionType(opt.value)}
+              className={`p-2.5 rounded-lg border text-left transition-colors ${
+                connectionType === opt.value
+                  ? 'border-accent-purple/60 bg-accent-purple/10 text-slate-200'
+                  : 'border-dark-border text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <p className="text-xs font-semibold">{opt.label}</p>
+              <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">{opt.desc}</p>
+            </button>
+          ))}
         </div>
       </div>
 
-      <div>
-        <label className={LABEL_CLASS}>Mode</label>
-        <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT_CLASS}>
-          <option value="full-auto">full-auto — autonomous</option>
-          <option value="auto-edit">auto-edit — edit files automatically</option>
-          <option value="suggest">suggest — suggest only</option>
-        </select>
-      </div>
-      <div>
-        <label className={LABEL_CLASS}>Working Directory</label>
-        <input
-          type="text"
-          value={workDir}
-          onChange={(e) => setWorkDir(e.target.value)}
-          placeholder="/tmp"
-          className={INPUT_CLASS + ' font-mono text-xs'}
-        />
-      </div>
+      {/* ── CLI Check (only for local-cli) ── */}
+      {connectionType === 'local-cli' && (
+        <div className="border border-dark-border rounded-xl p-3 space-y-2 bg-dark-bg/50">
+          <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+            <Terminal className="w-3.5 h-3.5" />
+            Installation Check
+          </p>
+          <p className="text-xs text-slate-500">
+            Install: <code className="font-mono bg-white/10 px-1 rounded">npm install -g @openai/codex</code>
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleCheckCli}
+              disabled={cliStatus === 'checking'}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-dark-border text-slate-300 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {cliStatus === 'checking' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Terminal className="w-3.5 h-3.5" />}
+              Check codex CLI
+            </button>
+            {cliStatus === 'ok' && <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+            {cliStatus === 'error' && <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle className="w-3.5 h-3.5" />{cliMsg}</span>}
+          </div>
+        </div>
+      )}
+
+      {connectionType !== 'api' && (
+        <div>
+          <label className={LABEL_CLASS}>Mode</label>
+          <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT_CLASS}>
+            <option value="full-auto">full-auto — autonomous</option>
+            <option value="auto-edit">auto-edit — edit files automatically</option>
+            <option value="suggest">suggest — suggest only</option>
+          </select>
+        </div>
+      )}
+      {connectionType !== 'api' && (
+        <div>
+          <label className={LABEL_CLASS}>Working Directory</label>
+          <input
+            type="text"
+            value={workDir}
+            onChange={(e) => setWorkDir(e.target.value)}
+            placeholder="/tmp"
+            className={INPUT_CLASS + ' font-mono text-xs'}
+          />
+        </div>
+      )}
       <div>
         <label className={LABEL_CLASS}>API Key Override (optional)</label>
         <input
@@ -1304,56 +1417,68 @@ function OpenAICodexConfig({
         />
       </div>
 
-      {/* Remote Connector Script */}
-      <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-300">Remote Machine Connector</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Run Codex on another machine. Script polls AgentHub for tasks and executes them locally.
-            </p>
-          </div>
-          {agentId && (
-            <button
-              type="button"
-              onClick={async () => {
-                setScriptLoading(true)
-                try {
-                  const r = await getAgentConnectorScript(agentId)
-                  setScript(r.data.script)
-                } catch { /* ignore */ }
-                finally { setScriptLoading(false) }
-              }}
-              disabled={scriptLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
-            >
-              {scriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-              Generate Script
-            </button>
-          )}
-          {!agentId && <span className="text-xs text-slate-600 italic">Save agent first</span>}
-        </div>
-        {script && (
-          <div className="space-y-2">
-            <div className="relative">
-              <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono whitespace-pre-wrap">
-                {script}
-              </pre>
+      {/* Remote Connector Script (only for remote-connector mode) */}
+      {connectionType === 'remote-connector' && (
+        <div className="border border-dark-border rounded-xl p-4 space-y-3 bg-dark-bg/50">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-300">Remote Machine Connector</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Run Codex on another machine. Script polls AgentHub for tasks and executes them locally.
+              </p>
+            </div>
+            {agentId && (
               <button
                 type="button"
-                onClick={() => { navigator.clipboard.writeText(script); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 1500) }}
-                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+                onClick={async () => {
+                  setScriptLoading(true)
+                  try {
+                    const r = await getAgentConnectorScript(agentId)
+                    setScript(r.data.script)
+                  } catch { /* ignore */ }
+                  finally { setScriptLoading(false) }
+                }}
+                disabled={scriptLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 hover:bg-accent-purple/30 border border-accent-purple/30 text-accent-purple rounded-lg transition-colors disabled:opacity-50 shrink-0"
               >
-                <Copy className="w-3 h-3" />
-                {scriptCopied ? 'Copied!' : 'Copy'}
+                {scriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                Generate Script
               </button>
-            </div>
-            <p className="text-xs text-slate-600">
-              On the remote machine: <code className="font-mono">chmod +x connector.sh && HUB_API_KEY=your-key ./connector.sh</code>
-            </p>
+            )}
+            {!agentId && <span className="text-xs text-slate-600 italic">Save agent first</span>}
           </div>
-        )}
-      </div>
+          {script && (
+            <div className="space-y-2">
+              <div className="relative">
+                <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono whitespace-pre-wrap">
+                  {script}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => { navigator.clipboard.writeText(script); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 1500) }}
+                  className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-xs bg-dark-sidebar border border-dark-border rounded text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  {scriptCopied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-600">
+                On the remote machine: <code className="font-mono">chmod +x connector.sh && HUB_API_KEY=your-key ./connector.sh</code>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* API mode info */}
+      {connectionType === 'api' && (
+        <div className="border border-dark-border rounded-xl p-3 bg-dark-bg/50">
+          <p className="text-xs text-slate-400">
+            API mode calls OpenAI directly via the API. No CLI installation needed.
+            Make sure an OpenAI API key is configured in <strong className="text-slate-300">Settings &gt; API Keys</strong> or use the override above.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -1517,7 +1642,7 @@ function OpenClawConfig({
       setHubPrompt(promptResult.data.prompt)
       setActiveDoc('bootstrap')
     } catch (e: any) {
-      setDocsError(e?.message || 'Fehler beim Laden der Onboarding-Dateien')
+      setDocsError(e?.message || 'Error loading onboarding files')
     } finally {
       setDocsLoading(false)
     }
@@ -1732,21 +1857,21 @@ function OpenClawConfig({
               Onboarding Files
             </p>
             <p className="text-xs text-slate-400 mt-0.5">
-              Lade diese Dateien in deinen OpenClaw-Agenten-Workspace. Verbindungsmodus: <strong className="text-slate-200">{connectionType}</strong>
+              Load these files into your OpenClaw agent workspace. Connection mode: <strong className="text-slate-200">{connectionType}</strong>
             </p>
           </div>
           <button type="button" onClick={handleGenerateDocs} disabled={docsLoading || !agentId}
-            title={!agentId ? 'Agent zuerst speichern' : 'Dateien neu generieren'}
+            title={!agentId ? 'Save agent first' : 'Regenerate files'}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-accent-purple hover:bg-purple-600 disabled:bg-dark-border disabled:text-slate-500 text-white rounded-lg transition-colors shrink-0">
             {docsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-            {docsLoading ? 'Lädt…' : bootstrapMd ? 'Aktualisieren' : 'Generieren'}
+            {docsLoading ? 'Loading...' : bootstrapMd ? 'Refresh' : 'Generate'}
           </button>
         </div>
 
         {/* Not-saved hint */}
         {!agentId && (
           <InfoBox variant="yellow">
-            Agent zuerst speichern — danach werden BOOTSTRAP.md, SOUL.md und HEARTBEAT.md automatisch generiert.
+            Save the agent first — BOOTSTRAP.md, SOUL.md, and HEARTBEAT.md will be generated automatically.
           </InfoBox>
         )}
 
@@ -1754,7 +1879,7 @@ function OpenClawConfig({
         {docsLoading && (
           <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
             <Loader2 className="w-4 h-4 animate-spin text-accent-purple" />
-            Generiere Onboarding-Dateien…
+            Generating onboarding files...
           </div>
         )}
 
@@ -1771,10 +1896,10 @@ function OpenClawConfig({
             {/* Tab Bar */}
             <div className="flex gap-1.5 flex-wrap border-b border-dark-border pb-2">
               {[
-                { key: 'bootstrap', label: '📦 BOOTSTRAP.md', hint: 'Einmalige Onboarding-Datei — Agent liest sie beim ersten Start, dann löschen' },
-                { key: 'soul',      label: '🌟 SOUL.md',       hint: 'Identitätsdatei — wird bei jeder Session geladen' },
-                { key: 'heartbeat', label: '💓 HEARTBEAT.md',  hint: 'Protokoll: Wie AgentHub diesen Agenten anruft' },
-                { key: 'prompt',    label: '🔌 Hub Prompt',    hint: 'In OpenClaw Systemconfig einfügen oder vorne in SOUL.md' },
+                { key: 'bootstrap', label: '📦 BOOTSTRAP.md', hint: 'One-time onboarding file — agent reads it on first start, then delete' },
+                { key: 'soul',      label: '🌟 SOUL.md',       hint: 'Identity file — loaded on every session' },
+                { key: 'heartbeat', label: '💓 HEARTBEAT.md',  hint: 'Protocol: How AgentHub calls this agent' },
+                { key: 'prompt',    label: '🔌 Hub Prompt',    hint: 'Insert into OpenClaw system config or prepend to SOUL.md' },
               ].map((tab) => {
                 const hasContent = tab.key === 'soul' ? !!soulMd : tab.key === 'heartbeat' ? !!heartbeatMd : tab.key === 'bootstrap' ? !!bootstrapMd : !!hubPrompt
                 if (!hasContent) return null
@@ -1801,7 +1926,7 @@ function OpenClawConfig({
               <div className="absolute top-2 right-2 flex flex-col gap-1">
                 <button type="button" onClick={() => activeContent && handleCopy(activeContent)}
                   className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-accent-purple hover:bg-purple-600 text-white rounded-lg transition-colors shadow">
-                  <Copy className="w-3.5 h-3.5" />{copied ? '✓ Kopiert' : 'Kopieren'}
+                  <Copy className="w-3.5 h-3.5" />{copied ? '✓ Copied' : 'Copy'}
                 </button>
                 <button type="button" onClick={() => activeContent && handleDownload(activeContent, activeFilename)}
                   className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-dark-sidebar border border-dark-border rounded-lg text-slate-300 hover:text-slate-100 hover:border-slate-500 transition-colors">
@@ -1813,12 +1938,12 @@ function OpenClawConfig({
             {/* Context hint */}
             <p className="text-[11px] text-slate-500">
               {activeDoc === 'bootstrap'
-                ? '→ In OpenClaw-Workspace ablegen: ~/.openclaw/agents/<name>/BOOTSTRAP.md — wird beim ersten Start gelesen, danach löschen (rm BOOTSTRAP.md)'
+                ? '→ Place in OpenClaw workspace: ~/.openclaw/agents/<name>/BOOTSTRAP.md — read on first start, then delete (rm BOOTSTRAP.md)'
                 : activeDoc === 'soul'
-                ? '→ In OpenClaw-Workspace ablegen: ~/.openclaw/agents/<name>/SOUL.md — wird bei jeder Session automatisch geladen'
+                ? '→ Place in OpenClaw workspace: ~/.openclaw/agents/<name>/SOUL.md — loaded automatically on every session'
                 : activeDoc === 'heartbeat'
-                ? '→ In OpenClaw-Workspace ablegen: ~/.openclaw/agents/<name>/HEARTBEAT.md — zeigt dem Agenten wie AgentHub ihn anruft'
-                : '→ In OpenClaw Systemkonfiguration einfügen oder vorne in SOUL.md hinzufügen'}
+                ? '→ Place in OpenClaw workspace: ~/.openclaw/agents/<name>/HEARTBEAT.md — shows the agent how AgentHub calls it'
+                : '→ Insert into OpenClaw system configuration or prepend to SOUL.md'}
             </p>
           </div>
         )}
@@ -2234,18 +2359,6 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Use Preset button */}
-        {!agent && (
-          <button
-            type="button"
-            onClick={() => setShowPresets(true)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-dashed border-accent-purple/40 rounded-lg text-sm text-accent-purple hover:border-accent-purple hover:bg-accent-purple/5 transition-all"
-          >
-            <span className="text-base">⚡</span>
-            Use a Preset
-          </button>
-        )}
-
         {/* Name */}
         <div>
           <label className={LABEL_CLASS}>Name *</label>

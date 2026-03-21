@@ -14,6 +14,11 @@ import {
   Terminal,
   Cpu,
   Building2,
+  Send,
+  Download,
+  FileText,
+  Loader2,
+  MessageSquare,
 } from 'lucide-react'
 import {
   getAgents,
@@ -22,6 +27,7 @@ import {
   updateAgent,
   runAgent,
   getAgentRuns,
+  getAgentSoulMd,
   Agent,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
@@ -61,6 +67,12 @@ function AgentRow({
   const [editOpen, setEditOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const [showChat, setShowChat] = useState(false)
+  const [chatInput, setChatInput] = useState('What is 2+2?')
+  const [chatResponse, setChatResponse] = useState<string | null>(null)
+  const [chatLoading, setChatLoading] = useState(false)
+  const [docsLoading, setDocsLoading] = useState(false)
+
   const Icon = TYPE_ICONS[agent.type] ?? Bot
 
   const { data: agentRunsData, isLoading: runsLoading } = useQuery({
@@ -68,6 +80,55 @@ function AgentRow({
     queryFn: () => getAgentRuns(agent.id, 5, 0),
     enabled: expanded,
   })
+
+  const handleTestChat = async () => {
+    if (!chatInput.trim()) return
+    setChatLoading(true)
+    setChatResponse(null)
+    try {
+      const result = await runAgent(agent.id, chatInput.trim())
+      const run = result.data
+      // Poll for completion (simple approach: wait then fetch)
+      setChatResponse(
+        run.output
+          ? typeof run.output === 'string' ? run.output : JSON.stringify(run.output, null, 2)
+          : run.error || `Run started (status: ${run.status}). Check Runs page for result.`
+      )
+      qc.invalidateQueries({ queryKey: ['runs'] })
+      qc.invalidateQueries({ queryKey: ['agentRuns', agent.id] })
+    } catch (err: any) {
+      setChatResponse(`Error: ${err.message}`)
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  const handleDownloadDocs = async () => {
+    setDocsLoading(true)
+    try {
+      const r = await getAgentSoulMd(agent.id)
+      const d = r.data
+      const files = [
+        { name: 'SOUL.md', content: d.soulMd },
+        { name: 'HEARTBEAT.md', content: d.heartbeatMd },
+        { name: 'BOOTSTRAP.md', content: d.bootstrapMd },
+      ]
+      for (const f of files) {
+        const blob = new Blob([f.content], { type: 'text/markdown' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${agent.name.replace(/\s+/g, '_')}_${f.name}`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+      toast.success('Files downloaded')
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setDocsLoading(false)
+    }
+  }
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteAgent(agent.id),
@@ -168,6 +229,21 @@ function AgentRow({
               <Play className="w-4 h-4" />
             </button>
             <button
+              onClick={() => setShowChat((v) => !v)}
+              title="Test / Chat"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-accent-purple hover:bg-accent-purple/10 transition-colors"
+            >
+              <MessageSquare className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleDownloadDocs}
+              disabled={docsLoading}
+              title="Download SOUL/HEARTBEAT/BOOTSTRAP files"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-30 transition-colors"
+            >
+              {docsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            </button>
+            <button
               onClick={() => setEditOpen(true)}
               title="Edit"
               className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
@@ -231,6 +307,45 @@ function AgentRow({
                 ))}
               </div>
             )}
+          </td>
+        </tr>
+      )}
+
+      {/* Test / Chat Panel */}
+      {showChat && (
+        <tr className="border-b border-dark-border bg-accent-purple/5">
+          <td colSpan={6} className="px-6 py-4">
+            <div className="max-w-2xl">
+              <p className="text-xs font-medium text-accent-purple uppercase tracking-wider mb-2">
+                Test Agent
+              </p>
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleTestChat()}
+                  placeholder="Type a message to test this agent..."
+                  className="flex-1 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple/50"
+                />
+                <button
+                  onClick={handleTestChat}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+                >
+                  {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Send
+                </button>
+              </div>
+              {chatResponse && (
+                <div className="bg-dark-bg border border-dark-border rounded-lg p-3">
+                  <p className="text-xs font-medium text-slate-500 mb-1">Response</p>
+                  <pre className="text-xs text-slate-300 font-mono whitespace-pre-wrap max-h-48 overflow-auto">
+                    {chatResponse}
+                  </pre>
+                </div>
+              )}
+            </div>
           </td>
         </tr>
       )}
