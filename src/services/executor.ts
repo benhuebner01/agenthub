@@ -3,9 +3,10 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
 import { db } from '../db';
-import { runs, auditLogs, agents, agentMemory, proposals } from '../db/schema';
+import { runs, auditLogs, agents, agentMemory, proposals, sharedMemory } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
+import { getApiKeyForProvider } from '../routes/settings';
 
 const execAsync = promisify(exec);
 
@@ -29,13 +30,44 @@ const OPENAI_MODELS = {
   'o4-mini': { inputCostPerMTok: 1.1, outputCostPerMTok: 4.4 },
 };
 
+// ─── Model Specifications (context windows + output limits) ──────────────────
+
+export const MODEL_SPECS: Record<string, {
+  provider: 'anthropic' | 'openai';
+  contextWindow: number;
+  maxOutput: number;
+  suggestedOutput: number; // 80% of maxOutput
+}> = {
+  'claude-opus-4-6':            { provider: 'anthropic', contextWindow: 200000, maxOutput: 32000,  suggestedOutput: 25600 },
+  'claude-sonnet-4-6':          { provider: 'anthropic', contextWindow: 200000, maxOutput: 16000,  suggestedOutput: 12800 },
+  'claude-haiku-4-5-20251001':  { provider: 'anthropic', contextWindow: 200000, maxOutput: 8192,   suggestedOutput: 6554 },
+  'gpt-5.4':                    { provider: 'openai',    contextWindow: 1048576, maxOutput: 32768,  suggestedOutput: 26214 },
+  'gpt-5.4-pro':                { provider: 'openai',    contextWindow: 1048576, maxOutput: 32768,  suggestedOutput: 26214 },
+  'gpt-5.4-mini':               { provider: 'openai',    contextWindow: 1048576, maxOutput: 16384,  suggestedOutput: 13107 },
+  'gpt-5.4-nano':               { provider: 'openai',    contextWindow: 128000,  maxOutput: 8192,   suggestedOutput: 6554 },
+  'gpt-4o':                     { provider: 'openai',    contextWindow: 128000,  maxOutput: 16384,  suggestedOutput: 13107 },
+  'gpt-4o-mini':                { provider: 'openai',    contextWindow: 128000,  maxOutput: 16384,  suggestedOutput: 13107 },
+  'o3':                         { provider: 'openai',    contextWindow: 200000,  maxOutput: 100000, suggestedOutput: 80000 },
+  'o3-mini':                    { provider: 'openai',    contextWindow: 200000,  maxOutput: 65536,  suggestedOutput: 52429 },
+  'o4-mini':                    { provider: 'openai',    contextWindow: 200000,  maxOutput: 100000, suggestedOutput: 80000 },
+};
+
+function getMaxTokens(config: Record<string, unknown>, model: string): number {
+  if (config.max_tokens && (config.max_tokens as number) > 0) return config.max_tokens as number;
+  const spec = MODEL_SPECS[model];
+  return spec ? spec.suggestedOutput : 8192;
+}
+
 // ─── Result Type ──────────────────────────────────────────────────────────────
 
 export interface ExecutionResult {
   success: boolean;
   output: unknown;
   tokensUsed: number;
+  inputTokens?: number;
+  outputTokens?: number;
   costUsd: number;
+  model?: string;
   error?: string;
 }
 
@@ -46,6 +78,17 @@ async function loadAgentMemoryContext(agentId: string): Promise<string> {
     const memories = await db.select().from(agentMemory).where(eq(agentMemory.agentId, agentId));
     if (memories.length === 0) return '';
     return '\n\nYour persistent memory:\n' + memories.map(m => `${m.key}: ${m.value}`).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+async function loadSharedMemoryContext(organizationId: string | null | undefined): Promise<string> {
+  if (!organizationId) return '';
+  try {
+    const memories = await db.select().from(sharedMemory).where(eq(sharedMemory.organizationId, organizationId));
+    if (memories.length === 0) return '';
+    return '\n\nShared organization memory:\n' + memories.map(m => `${m.key}: ${m.value}`).join('\n');
   } catch {
     return '';
   }
@@ -124,9 +167,9 @@ async function executeHttpAgent(config: Record<string, unknown>, input: unknown)
 async function executeClaudeAgent(config: Record<string, unknown>, input: unknown, memoryContext: string): Promise<ExecutionResult> {
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
 
-  const apiKey = (config.api_key_override as string) || process.env.ANTHROPIC_API_KEY;
+  const apiKey = (config.api_key_override as string) || await getApiKeyForProvider('anthropic');
   if (!apiKey) {
-    throw new Error('Claude agent requires ANTHROPIC_API_KEY or config.api_key_override');
+    throw new Error('Claude agent requires ANTHROPIC_API_KEY — add it in Settings or .env');
   }
 
   const client = new Anthropic({ apiKey });
@@ -138,7 +181,7 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
 
   const response = await client.messages.create({
     model,
-    max_tokens: (config.max_tokens as number) || 4096,
+    max_tokens: getMaxTokens(config, model),
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
   });
@@ -159,7 +202,10 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
     success: true,
     output: { text: outputText, stop_reason: response.stop_reason },
     tokensUsed,
+    inputTokens,
+    outputTokens,
     costUsd,
+    model,
   };
 }
 
@@ -168,9 +214,9 @@ async function executeClaudeAgent(config: Record<string, unknown>, input: unknow
 async function executeOpenAIAgent(config: Record<string, unknown>, input: unknown, memoryContext: string): Promise<ExecutionResult> {
   const OpenAI = (await import('openai')).default;
 
-  const apiKey = (config.api_key_override as string) || process.env.OPENAI_API_KEY;
+  const apiKey = (config.api_key_override as string) || await getApiKeyForProvider('openai');
   if (!apiKey) {
-    throw new Error('OpenAI agent requires OPENAI_API_KEY or config.api_key_override');
+    throw new Error('OpenAI agent requires OPENAI_API_KEY — add it in Settings or .env');
   }
 
   const client = new OpenAI({ apiKey });
@@ -182,7 +228,7 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
 
   const response = await client.chat.completions.create({
     model,
-    max_tokens: (config.max_tokens as number) || 4096,
+    max_tokens: getMaxTokens(config, model),
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },
@@ -202,7 +248,10 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
     success: true,
     output: { text: outputText, finish_reason: response.choices[0]?.finish_reason },
     tokensUsed,
+    inputTokens,
+    outputTokens,
     costUsd,
+    model,
   };
 }
 
@@ -467,45 +516,50 @@ async function executeA2AAgent(config: Record<string, unknown>, input: unknown):
 // ─── Internal Agent ───────────────────────────────────────────────────────────
 
 async function executeInternalAgent(config: Record<string, unknown>, input: unknown, memoryContext: string): Promise<ExecutionResult> {
-  const provider = (config.provider as string) || (process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'openai');
+  const anthropicKey = await getApiKeyForProvider('anthropic');
+  const openaiKey = await getApiKeyForProvider('openai');
+  const provider = (config.provider as string) || (anthropicKey ? 'anthropic' : 'openai');
 
   if (provider === 'anthropic') {
     const Anthropic = require('@anthropic-ai/sdk');
-    const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    if (!anthropicKey) throw new Error('Internal agent needs ANTHROPIC_API_KEY — add it in Settings or .env');
+    const client = new Anthropic.default({ apiKey: anthropicKey });
     const model = (config.model as string) || 'claude-sonnet-4-6';
     const baseSystemPrompt = (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.';
     const systemPrompt = baseSystemPrompt + memoryContext;
-    const messages: any[] = [{ role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) }];
     const resp = await client.messages.create({
       model,
-      max_tokens: 4096,
+      max_tokens: getMaxTokens(config, model),
       system: systemPrompt,
-      messages,
+      messages: [{ role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) }],
     });
+    const inTok = resp.usage.input_tokens;
+    const outTok = resp.usage.output_tokens;
     const content = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-    const tokensUsed = resp.usage.input_tokens + resp.usage.output_tokens;
     const modelCosts = CLAUDE_MODELS[model as keyof typeof CLAUDE_MODELS] || { inputCostPerMTok: 3, outputCostPerMTok: 15 };
-    const costUsd =
-      (resp.usage.input_tokens / 1_000_000) * modelCosts.inputCostPerMTok +
-      (resp.usage.output_tokens / 1_000_000) * modelCosts.outputCostPerMTok;
-    return { success: true, output: content, tokensUsed, costUsd };
+    const costUsd = (inTok / 1_000_000) * modelCosts.inputCostPerMTok + (outTok / 1_000_000) * modelCosts.outputCostPerMTok;
+    return { success: true, output: content, tokensUsed: inTok + outTok, inputTokens: inTok, outputTokens: outTok, costUsd, model };
   } else {
     const OpenAI = require('openai');
-    const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
+    if (!openaiKey) throw new Error('Internal agent needs OPENAI_API_KEY — add it in Settings or .env');
+    const client = new OpenAI.default({ apiKey: openaiKey });
     const model = (config.model as string) || 'gpt-5.4';
     const baseSystemPrompt = (config.systemPrompt as string) || 'You are a helpful AI assistant embedded in AgentHub.';
     const systemPrompt = baseSystemPrompt + memoryContext;
     const resp = await client.chat.completions.create({
       model,
+      max_tokens: getMaxTokens(config, model),
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) },
       ],
     });
     const content = resp.choices[0]?.message?.content || '';
-    const usage = resp.usage || { prompt_tokens: 0, completion_tokens: 0 };
-    const tokensUsed = usage.prompt_tokens + usage.completion_tokens;
-    return { success: true, output: content, tokensUsed, costUsd: 0 };
+    const inTok = resp.usage?.prompt_tokens || 0;
+    const outTok = resp.usage?.completion_tokens || 0;
+    const modelCosts = OPENAI_MODELS[model as keyof typeof OPENAI_MODELS] || { inputCostPerMTok: 2.5, outputCostPerMTok: 10 };
+    const costUsd = (inTok / 1_000_000) * modelCosts.inputCostPerMTok + (outTok / 1_000_000) * modelCosts.outputCostPerMTok;
+    return { success: true, output: content, tokensUsed: inTok + outTok, inputTokens: inTok, outputTokens: outTok, costUsd, model };
   }
 }
 
@@ -525,8 +579,10 @@ export async function executeAgent(
     throw new Error(`Agent ${agentId} not found`);
   }
 
-  // Load persistent memory context
-  const memoryContext = await loadAgentMemoryContext(agentId);
+  // Load persistent memory context + shared org memory
+  const agentMem = await loadAgentMemoryContext(agentId);
+  const sharedMem = await loadSharedMemoryContext(agentRecord.organizationId);
+  const memoryContext = agentMem + sharedMem;
 
   // Insert initial run record
   await db.insert(runs).values({
@@ -642,7 +698,9 @@ export async function executeAgent(
 
     const completedAt = new Date().toISOString();
 
-    // Update run as success
+    const durationMs = Date.now() - new Date(startedAt).getTime();
+
+    // Update run as success with detailed fields
     await db
       .update(runs)
       .set({
@@ -650,12 +708,15 @@ export async function executeAgent(
         completedAt,
         output: result.output as Record<string, unknown>,
         tokensUsed: result.tokensUsed,
+        inputTokens: result.inputTokens || 0,
+        outputTokens: result.outputTokens || 0,
         costUsd: result.costUsd,
+        model: result.model || null,
+        durationMs,
       })
       .where(eq(runs.id, runId));
 
     // Log success
-    const agentCreatedAt = agentRecord.createdAt ? new Date(agentRecord.createdAt).getTime() : Date.now();
     await db.insert(auditLogs).values({
       id: uuidv4(),
       runId,
@@ -663,8 +724,11 @@ export async function executeAgent(
       eventType: 'run_completed',
       data: {
         tokensUsed: result.tokensUsed,
+        inputTokens: result.inputTokens || 0,
+        outputTokens: result.outputTokens || 0,
         costUsd: result.costUsd,
-        durationMs: Date.now() - agentCreatedAt,
+        model: result.model || null,
+        durationMs,
       },
       createdAt: new Date().toISOString(),
     });

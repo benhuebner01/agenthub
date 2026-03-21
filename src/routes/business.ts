@@ -1,27 +1,31 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { agents, organizations, proposals, runs } from '../db/schema';
+import { agents, organizations, proposals, runs, sharedMemory } from '../db/schema';
 import { eq, desc, and, gte, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
+import { getApiKeyForProvider } from './settings';
 
 const router = Router();
 
 // ─── AI Analysis Helpers ──────────────────────────────────────────────────────
 
 async function callAI(systemPrompt: string, userMessage: string): Promise<string> {
-  if (process.env.ANTHROPIC_API_KEY) {
+  const anthropicKey = await getApiKeyForProvider('anthropic');
+  const openaiKey = await getApiKeyForProvider('openai');
+
+  if (anthropicKey) {
     const Anthropic = require('@anthropic-ai/sdk');
-    const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const client = new Anthropic.default({ apiKey: anthropicKey });
     const resp = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 12800,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     });
     return resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-  } else if (process.env.OPENAI_API_KEY) {
+  } else if (openaiKey) {
     const OpenAI = require('openai');
-    const client = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
+    const client = new OpenAI.default({ apiKey: openaiKey });
     const resp = await client.chat.completions.create({
       model: 'gpt-5.4',
       messages: [
@@ -31,7 +35,7 @@ async function callAI(systemPrompt: string, userMessage: string): Promise<string
     });
     return resp.choices[0]?.message?.content || '';
   }
-  throw new Error('No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.');
+  throw new Error('No AI provider configured. Add API keys in Settings or set ANTHROPIC_API_KEY / OPENAI_API_KEY in .env.');
 }
 
 // ─── POST /api/business/analyze ──────────────────────────────────────────────
@@ -81,6 +85,7 @@ DESIGN PRINCIPLES:
 3. Propose 1 CEO + 3-6 team agents (don't over-staff)
 4. Each agent's jobDescription must be specific and mission-driven
 5. Include costBreakdown: realistic token estimate per agent per month
+6. EVERY agent MUST have a unique, descriptive name (NEVER "Internal Agent" or generic names). Use role-based names like "Research Analyst", "Content Strategist", "Ops Coordinator", "QA Auditor" etc.
 
 Respond with ONLY valid JSON, no markdown:
 {
@@ -183,7 +188,7 @@ router.post('/create', async (req: Request, res: Response) => {
         const agentId = uuidv4();
         const [teamAgent] = await db.insert(agents).values({
           id: agentId,
-          name: teamConfig.name,
+          name: teamConfig.name || `${(teamConfig.role || 'Worker').charAt(0).toUpperCase() + (teamConfig.role || 'worker').slice(1)} - ${(teamConfig.jobDescription || 'Agent').split(' ').slice(0, 3).join(' ')}`,
           description: teamConfig.description || null,
           type: teamConfig.type || 'claude',
           config: teamConfig.config || {},
@@ -480,6 +485,85 @@ router.post('/proposals/:id/reject', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Business] POST /proposals/:id/reject error:', err);
     res.status(500).json({ error: 'Failed to reject proposal' });
+  }
+});
+
+// ─── PATCH /api/business/organizations/:id/status ────────────────────────────
+// Start/Pause an organization
+
+router.patch('/organizations/:id/status', async (req: Request, res: Response) => {
+  try {
+    const { status } = req.body as { status: string };
+    if (!['active', 'paused'].includes(status)) {
+      res.status(400).json({ error: 'status must be "active" or "paused"' });
+      return;
+    }
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, req.params.id));
+    if (!org) { res.status(404).json({ error: 'Organization not found' }); return; }
+
+    await db.update(organizations)
+      .set({ status, updatedAt: new Date().toISOString() })
+      .where(eq(organizations.id, req.params.id));
+
+    res.json({ data: { ...org, status } });
+  } catch (err: any) {
+    console.error('[Business] PATCH /organizations/:id/status error:', err);
+    res.status(500).json({ error: 'Failed to update organization status' });
+  }
+});
+
+// ─── Shared Memory — organization-wide key-value (Paperclip-style hub) ───────
+
+router.get('/organizations/:id/memory', async (req: Request, res: Response) => {
+  try {
+    const memories = await db.select().from(sharedMemory)
+      .where(eq(sharedMemory.organizationId, req.params.id));
+    res.json({ data: memories });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch shared memory' });
+  }
+});
+
+router.post('/organizations/:id/memory', async (req: Request, res: Response) => {
+  try {
+    const { key, value, agentId } = req.body as { key: string; value: string; agentId?: string };
+    if (!key || value === undefined) {
+      res.status(400).json({ error: 'key and value are required' });
+      return;
+    }
+
+    const existing = await db.select().from(sharedMemory)
+      .where(and(eq(sharedMemory.organizationId, req.params.id), eq(sharedMemory.key, key)));
+
+    if (existing.length > 0) {
+      await db.update(sharedMemory)
+        .set({ value, createdByAgentId: agentId || null, updatedAt: new Date().toISOString() })
+        .where(eq(sharedMemory.id, existing[0].id));
+    } else {
+      await db.insert(sharedMemory).values({
+        organizationId: req.params.id,
+        key,
+        value,
+        createdByAgentId: agentId || null,
+      });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save shared memory' });
+  }
+});
+
+router.delete('/organizations/:id/memory/:key', async (req: Request, res: Response) => {
+  try {
+    await db.delete(sharedMemory)
+      .where(and(
+        eq(sharedMemory.organizationId, req.params.id),
+        eq(sharedMemory.key, decodeURIComponent(req.params.key)),
+      ));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to delete shared memory' });
   }
 });
 

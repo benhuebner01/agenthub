@@ -36,11 +36,11 @@ export default function Modal({
       />
       {/* Panel */}
       <div
-        className={`relative z-10 w-full ${maxWidth} bg-dark-card border border-dark-border rounded-xl shadow-2xl`}
+        className={`relative z-10 w-full ${maxWidth} max-h-[90vh] flex flex-col bg-dark-card border border-dark-border rounded-xl shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border shrink-0">
           <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
           <button
             onClick={onClose}
@@ -49,8 +49,8 @@ export default function Modal({
             <X className="w-5 h-5" />
           </button>
         </div>
-        {/* Content */}
-        <div className="px-6 py-5">{children}</div>
+        {/* Content — scrollable */}
+        <div className="px-6 py-5 overflow-y-auto flex-1 min-h-0">{children}</div>
       </div>
     </div>
   )

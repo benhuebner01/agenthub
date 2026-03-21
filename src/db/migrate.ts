@@ -144,9 +144,32 @@ const sqliteDDL = `
   CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
   CREATE INDEX IF NOT EXISTS idx_tool_calls_run_id ON tool_calls(run_id);
   CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agent_id);
+  CREATE TABLE IF NOT EXISTS shared_memory (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_by_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(organization_id, key)
+  );
+
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    encrypted_key TEXT NOT NULL,
+    key_hint TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
   CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
   CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
+  CREATE INDEX IF NOT EXISTS idx_shared_memory_org_id ON shared_memory(organization_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider);
 `;
 
 const pgDDL = `
@@ -290,9 +313,32 @@ const pgDDL = `
   CREATE INDEX IF NOT EXISTS idx_audit_logs_agent_id ON audit_logs(agent_id);
   CREATE INDEX IF NOT EXISTS idx_schedules_agent_id ON schedules(agent_id);
   CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agent_id);
+  CREATE TABLE IF NOT EXISTS shared_memory (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_by_agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id, key)
+  );
+
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    encrypted_key TEXT NOT NULL,
+    key_hint TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   CREATE INDEX IF NOT EXISTS idx_proposals_organization_id ON proposals(organization_id);
   CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
   CREATE INDEX IF NOT EXISTS idx_agents_organization_id ON agents(organization_id);
+  CREATE INDEX IF NOT EXISTS idx_shared_memory_org_id ON shared_memory(organization_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider);
 `;
 
 async function migrate() {
@@ -311,6 +357,15 @@ async function migrate() {
     addColumnSafe(`ALTER TABLE agents ADD COLUMN job_description TEXT`);
     addColumnSafe(`ALTER TABLE agents ADD COLUMN organization_id TEXT`);
 
+    // Org status
+    addColumnSafe(`ALTER TABLE organizations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
+
+    // Run detail fields
+    addColumnSafe(`ALTER TABLE runs ADD COLUMN model TEXT`);
+    addColumnSafe(`ALTER TABLE runs ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0`);
+    addColumnSafe(`ALTER TABLE runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`);
+    addColumnSafe(`ALTER TABLE runs ADD COLUMN duration_ms INTEGER`);
+
     console.log('Migrations complete (SQLite)');
   } else {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -325,6 +380,11 @@ async function migrate() {
         ALTER TABLE agents ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'worker';
         ALTER TABLE agents ADD COLUMN IF NOT EXISTS job_description TEXT;
         ALTER TABLE agents ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+        ALTER TABLE runs ADD COLUMN IF NOT EXISTS model TEXT;
+        ALTER TABLE runs ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE runs ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
       `);
 
       console.log('Migrations complete (PostgreSQL)');

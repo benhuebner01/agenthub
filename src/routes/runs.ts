@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { runs, agents, toolCalls, auditLogs } from '../db/schema';
-import { eq, desc, and, SQL } from 'drizzle-orm';
+import { eq, desc, and, gte, SQL } from 'drizzle-orm';
 
 const router = Router();
 
@@ -29,12 +29,19 @@ router.get('/', async (req: Request, res: Response) => {
         agentId: runs.agentId,
         agentName: agents.name,
         agentType: agents.type,
+        agentRole: agents.role,
         scheduleId: runs.scheduleId,
         status: runs.status,
         startedAt: runs.startedAt,
         completedAt: runs.completedAt,
+        input: runs.input,
+        output: runs.output,
         tokensUsed: runs.tokensUsed,
+        inputTokens: runs.inputTokens,
+        outputTokens: runs.outputTokens,
         costUsd: runs.costUsd,
+        model: runs.model,
+        durationMs: runs.durationMs,
         triggeredBy: runs.triggeredBy,
         error: runs.error,
         createdAt: runs.createdAt,
@@ -56,6 +63,55 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/runs/heartbeat — Live monitoring feed ──────────────────────────
+// MUST be before /:id to avoid "heartbeat" being treated as a run ID
+
+router.get('/heartbeat', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.query.orgId as string | undefined;
+    const sinceMin = parseInt(req.query.sinceMin as string || '5', 10);
+    const since = new Date(Date.now() - sinceMin * 60_000).toISOString();
+
+    const conditions: SQL[] = [gte(runs.createdAt, since)];
+    if (orgId) {
+      conditions.push(eq(agents.organizationId, orgId));
+    }
+
+    const recentRuns = await db
+      .select({
+        id: runs.id,
+        agentId: runs.agentId,
+        agentName: agents.name,
+        agentType: agents.type,
+        agentRole: agents.role,
+        status: runs.status,
+        startedAt: runs.startedAt,
+        completedAt: runs.completedAt,
+        input: runs.input,
+        output: runs.output,
+        error: runs.error,
+        tokensUsed: runs.tokensUsed,
+        inputTokens: runs.inputTokens,
+        outputTokens: runs.outputTokens,
+        costUsd: runs.costUsd,
+        model: runs.model,
+        durationMs: runs.durationMs,
+        triggeredBy: runs.triggeredBy,
+        createdAt: runs.createdAt,
+      })
+      .from(runs)
+      .innerJoin(agents, eq(runs.agentId, agents.id))
+      .where(and(...conditions))
+      .orderBy(desc(runs.createdAt))
+      .limit(50);
+
+    res.json({ data: recentRuns });
+  } catch (err: any) {
+    console.error('[Runs] GET /heartbeat error:', err);
+    res.status(500).json({ error: 'Failed to fetch heartbeat data' });
+  }
+});
+
 // GET /api/runs/:id
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -65,6 +121,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         agentId: runs.agentId,
         agentName: agents.name,
         agentType: agents.type,
+        agentRole: agents.role,
         scheduleId: runs.scheduleId,
         status: runs.status,
         startedAt: runs.startedAt,
@@ -73,7 +130,11 @@ router.get('/:id', async (req: Request, res: Response) => {
         output: runs.output,
         error: runs.error,
         tokensUsed: runs.tokensUsed,
+        inputTokens: runs.inputTokens,
+        outputTokens: runs.outputTokens,
         costUsd: runs.costUsd,
+        model: runs.model,
+        durationMs: runs.durationMs,
         triggeredBy: runs.triggeredBy,
         createdAt: runs.createdAt,
       })
@@ -93,7 +154,14 @@ router.get('/:id', async (req: Request, res: Response) => {
       .where(eq(toolCalls.runId, req.params.id))
       .orderBy(toolCalls.createdAt);
 
-    res.json({ data: { ...run, toolCalls: runToolCalls } });
+    // Also get audit logs for this run
+    const runAuditLogs = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.runId, req.params.id))
+      .orderBy(auditLogs.createdAt);
+
+    res.json({ data: { ...run, toolCalls: runToolCalls, auditLogs: runAuditLogs } });
   } catch (err) {
     console.error('[Runs] GET /:id error:', err);
     res.status(500).json({ error: 'Failed to fetch run' });

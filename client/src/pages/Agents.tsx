@@ -236,7 +236,7 @@ function AgentRow({
       )}
 
       {/* Edit Modal */}
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Agent">
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Agent" maxWidth="max-w-3xl">
         <AgentForm agent={agent} onClose={() => setEditOpen(false)} />
       </Modal>
 
@@ -395,7 +395,7 @@ export default function Agents() {
         )}
       </div>
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create Agent">
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create Agent" maxWidth="max-w-3xl">
         <AgentForm onClose={() => setCreateOpen(false)} />
       </Modal>
     </div>

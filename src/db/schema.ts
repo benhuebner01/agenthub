@@ -8,6 +8,7 @@ export const organizations = sqliteTable('organizations', {
   description: text('description'),
   industry: text('industry'),
   goals: text('goals', { mode: 'json' }), // string[]
+  status: text('status').notNull().default('active'), // 'active' | 'paused'
   createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
@@ -53,7 +54,11 @@ export const runs = sqliteTable('runs', {
   output: text('output', { mode: 'json' }),
   error: text('error'),
   tokensUsed: integer('tokens_used').notNull().default(0),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
   costUsd: real('cost_usd').notNull().default(0),
+  model: text('model'),
+  durationMs: integer('duration_ms'),
   triggeredBy: text('triggered_by').notNull().default('manual'), // 'schedule'|'manual'|'telegram'|'api'
   createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 });
@@ -147,6 +152,28 @@ export const proposals = sqliteTable('proposals', {
   resolvedAt: text('resolved_at'),
 });
 
+// Shared Memory — organization-wide key-value store (Paperclip-style centralized hub)
+export const sharedMemory = sqliteTable('shared_memory', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  createdByAgentId: text('created_by_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+}, (t) => ({ unq: unique().on(t.organizationId, t.key) }));
+
+// API Keys — encrypted storage for provider keys (managed via UI)
+export const apiKeys = sqliteTable('api_keys', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(), // 'anthropic' | 'openai' | 'custom'
+  encryptedKey: text('encrypted_key').notNull(),
+  keyHint: text('key_hint').notNull(), // last 4 chars, e.g. "abcd"
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
+
 // Type exports for settings
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
@@ -155,6 +182,12 @@ export type NewSetting = typeof settings.$inferInsert;
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   agents: many(agents),
   proposals: many(proposals),
+  sharedMemory: many(sharedMemory),
+}));
+
+export const sharedMemoryRelations = relations(sharedMemory, ({ one }) => ({
+  organization: one(organizations, { fields: [sharedMemory.organizationId], references: [organizations.id] }),
+  createdByAgent: one(agents, { fields: [sharedMemory.createdByAgentId], references: [agents.id] }),
 }));
 
 export const agentsRelations = relations(agents, ({ many, one }) => ({
@@ -232,3 +265,7 @@ export type AgentCall = typeof agentCalls.$inferSelect;
 export type NewAgentCall = typeof agentCalls.$inferInsert;
 export type Proposal = typeof proposals.$inferSelect;
 export type NewProposal = typeof proposals.$inferInsert;
+export type SharedMemory = typeof sharedMemory.$inferSelect;
+export type NewSharedMemory = typeof sharedMemory.$inferInsert;
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;
