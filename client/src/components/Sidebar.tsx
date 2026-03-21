@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Settings,
   Sparkles,
+  Activity,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { getProposals } from '../api/client'
@@ -22,6 +23,7 @@ const navItems = [
   { to: '/organization', icon: Building2, label: 'Organization', end: false },
   { to: '/schedules', icon: Clock, label: 'Schedules', end: false },
   { to: '/runs', icon: PlayCircle, label: 'Runs', end: false },
+  { to: '/heartbeat', icon: Activity, label: 'Heartbeat', end: false },
   { to: '/budgets', icon: Wallet, label: 'Budgets', end: false },
   { to: '/costs', icon: TrendingUp, label: 'Costs', end: false },
   { to: '/logs', icon: ScrollText, label: 'Logs', end: false },

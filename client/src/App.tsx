@@ -14,6 +14,7 @@ import Organization from './pages/Organization'
 import BusinessSetup from './pages/BusinessSetup'
 import Costs from './pages/Costs'
 import SettingsPage from './pages/Settings'
+import Heartbeat from './pages/Heartbeat'
 import { getSetupStatus } from './api/client'
 
 function AppRoutes() {
@@ -67,6 +68,7 @@ function AppRoutes() {
                 <Route path="/business-setup" element={<BusinessSetup />} />
                 <Route path="/costs" element={<Costs />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/heartbeat" element={<Heartbeat />} />
                 <Route path="/proposals" element={<Navigate to="/organization" replace />} />
               </Routes>
             </Layout>

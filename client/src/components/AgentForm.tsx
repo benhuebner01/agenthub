@@ -59,6 +59,32 @@ const CATEGORY_META: Record<PresetCategory, { label: string; icon: string; descr
 
 const CATEGORY_ORDER: PresetCategory[] = ['local', 'ai-api', 'http', 'automation', 'mcp', 'bash']
 
+// ─── Model Specs (mirrors backend MODEL_SPECS) ──────────────────────────────
+
+const MODEL_SPECS: Record<string, {
+  provider: 'anthropic' | 'openai'
+  contextWindow: number
+  maxOutput: number
+  suggestedOutput: number
+}> = {
+  'claude-opus-4-6':            { provider: 'anthropic', contextWindow: 200000, maxOutput: 32000,  suggestedOutput: 25600 },
+  'claude-sonnet-4-6':          { provider: 'anthropic', contextWindow: 200000, maxOutput: 16000,  suggestedOutput: 12800 },
+  'claude-haiku-4-5-20251001':  { provider: 'anthropic', contextWindow: 200000, maxOutput: 8192,   suggestedOutput: 6554 },
+  'gpt-5.4':                    { provider: 'openai',    contextWindow: 1048576, maxOutput: 32768,  suggestedOutput: 26214 },
+  'gpt-5.4-pro':                { provider: 'openai',    contextWindow: 1048576, maxOutput: 32768,  suggestedOutput: 26214 },
+  'gpt-5.4-mini':               { provider: 'openai',    contextWindow: 1048576, maxOutput: 16384,  suggestedOutput: 13107 },
+  'gpt-5.4-nano':               { provider: 'openai',    contextWindow: 128000,  maxOutput: 8192,   suggestedOutput: 6554 },
+  'gpt-4o':                     { provider: 'openai',    contextWindow: 128000,  maxOutput: 16384,  suggestedOutput: 13107 },
+  'gpt-4o-mini':                { provider: 'openai',    contextWindow: 128000,  maxOutput: 16384,  suggestedOutput: 13107 },
+  'o3':                         { provider: 'openai',    contextWindow: 200000,  maxOutput: 100000, suggestedOutput: 80000 },
+  'o3-mini':                    { provider: 'openai',    contextWindow: 200000,  maxOutput: 65536,  suggestedOutput: 52429 },
+  'o4-mini':                    { provider: 'openai',    contextWindow: 200000,  maxOutput: 100000, suggestedOutput: 80000 },
+}
+
+function formatK(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K` : String(n)
+}
+
 // ─── Grouped type picker data ─────────────────────────────────────────────────
 
 interface TypeOption {
@@ -632,18 +658,27 @@ function ClaudeConfig({
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
 }) {
-  const [model, setModel] = useState((config.model as string) || 'claude-sonnet-4-6')
+  const initialModel = (config.model as string) || 'claude-sonnet-4-6'
+  const [model, setModel] = useState(initialModel)
   const [systemPrompt, setSystemPrompt] = useState(
     (config.systemPrompt as string) || (config.system_prompt as string) || ''
   )
-  const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || 4096))
+  const spec = MODEL_SPECS[model]
+  const defaultTokens = spec ? spec.suggestedOutput : 8192
+  const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || defaultTokens))
   const [apiKey, setApiKey] = useState((config.api_key_override as string) || '')
   const [showApiKey, setShowApiKey] = useState(false)
   const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [keyMsg, setKeyMsg] = useState('')
 
+  const handleModelChange = (newModel: string) => {
+    setModel(newModel)
+    const newSpec = MODEL_SPECS[newModel]
+    if (newSpec) setMaxTokens(String(newSpec.suggestedOutput))
+  }
+
   useEffect(() => {
-    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || 4096 }
+    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || defaultTokens }
     if (apiKey) c.api_key_override = apiKey
     onChange(c)
   }, [model, systemPrompt, maxTokens, apiKey])
@@ -664,7 +699,7 @@ function ClaudeConfig({
     <div className="space-y-3">
       <div>
         <label className={LABEL_CLASS}>Model</label>
-        <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
+        <select value={model} onChange={(e) => handleModelChange(e.target.value)} className={INPUT_CLASS}>
           <optgroup label="Claude">
             <option value="claude-opus-4-6">claude-opus-4-6 — most capable</option>
             <option value="claude-sonnet-4-6">claude-sonnet-4-6 — balanced (recommended)</option>
@@ -689,9 +724,14 @@ function ClaudeConfig({
           value={maxTokens}
           onChange={(e) => setMaxTokens(e.target.value)}
           min={1}
-          max={200000}
+          max={spec?.maxOutput || 200000}
           className={INPUT_CLASS}
         />
+        {spec && (
+          <p className="text-xs text-slate-500 mt-1">
+            Context: {formatK(spec.contextWindow)} | Max output: {formatK(spec.maxOutput)} | Using: {formatK(parseInt(maxTokens) || 0)} (80% recommended)
+          </p>
+        )}
       </div>
 
       {/* ── API Key + Test ── */}
@@ -741,18 +781,27 @@ function OpenAIConfig({
   config: Record<string, unknown>
   onChange: (c: Record<string, unknown>) => void
 }) {
-  const [model, setModel] = useState((config.model as string) || 'gpt-5.4')
+  const initialModel = (config.model as string) || 'gpt-5.4'
+  const [model, setModel] = useState(initialModel)
   const [systemPrompt, setSystemPrompt] = useState(
     (config.systemPrompt as string) || (config.system_prompt as string) || ''
   )
-  const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || 4096))
+  const oSpec = MODEL_SPECS[model]
+  const oDefaultTokens = oSpec ? oSpec.suggestedOutput : 8192
+  const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || oDefaultTokens))
   const [apiKey, setApiKey] = useState((config.api_key_override as string) || '')
   const [showApiKey, setShowApiKey] = useState(false)
   const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [keyMsg, setKeyMsg] = useState('')
 
+  const handleModelChange = (newModel: string) => {
+    setModel(newModel)
+    const newSpec = MODEL_SPECS[newModel]
+    if (newSpec) setMaxTokens(String(newSpec.suggestedOutput))
+  }
+
   useEffect(() => {
-    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || 4096 }
+    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || oDefaultTokens }
     if (apiKey) c.api_key_override = apiKey
     onChange(c)
   }, [model, systemPrompt, maxTokens, apiKey])
@@ -772,7 +821,7 @@ function OpenAIConfig({
     <div className="space-y-3">
       <div>
         <label className={LABEL_CLASS}>Model</label>
-        <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT_CLASS}>
+        <select value={model} onChange={(e) => handleModelChange(e.target.value)} className={INPUT_CLASS}>
           <optgroup label="GPT-5.4">
             <option value="gpt-5.4">gpt-5.4 — flagship ($2.50/$15.00)</option>
             <option value="gpt-5.4-pro">gpt-5.4-pro — max performance</option>
@@ -807,9 +856,14 @@ function OpenAIConfig({
           value={maxTokens}
           onChange={(e) => setMaxTokens(e.target.value)}
           min={1}
-          max={128000}
+          max={oSpec?.maxOutput || 128000}
           className={INPUT_CLASS}
         />
+        {oSpec && (
+          <p className="text-xs text-slate-500 mt-1">
+            Context: {formatK(oSpec.contextWindow)} | Max output: {formatK(oSpec.maxOutput)} | Using: {formatK(parseInt(maxTokens) || 0)} (80% recommended)
+          </p>
+        )}
       </div>
 
       {/* ── API Key + Test ── */}

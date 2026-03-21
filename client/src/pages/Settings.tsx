@@ -9,6 +9,12 @@ import {
   Send,
   Eye,
   EyeOff,
+  Key,
+  Shield,
+  Loader2,
+  ToggleLeft,
+  ToggleRight,
+  FlaskConical,
 } from 'lucide-react'
 import {
   getAgents,
@@ -16,8 +22,14 @@ import {
   setTelegramRoute,
   addTelegramCommandRoute,
   removeTelegramCommandRoute,
+  getApiKeys,
+  addApiKey,
+  deleteApiKey,
+  testApiKeyById,
+  toggleApiKey,
   Agent,
   TelegramRoutes,
+  ApiKeyEntry,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
 
@@ -270,46 +282,212 @@ function SecuritySection() {
   )
 }
 
-// ─── AI Providers Section ─────────────────────────────────────────────────────
+// ─── API Keys Section ─────────────────────────────────────────────────────────
 
-function AIProvidersSection() {
+function ApiKeysSection() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [showAdd, setShowAdd] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newProvider, setNewProvider] = useState('anthropic')
+  const [newKey, setNewKey] = useState('')
+  const [testingId, setTestingId] = useState<string | null>(null)
+
+  const { data: keysData, isLoading } = useQuery({
+    queryKey: ['apiKeys'],
+    queryFn: getApiKeys,
+  })
+
+  const keys: ApiKeyEntry[] = keysData?.data ?? []
+
+  const addMutation = useMutation({
+    mutationFn: () => addApiKey(newName, newProvider, newKey),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['apiKeys'] })
+      toast.success('API key added securely')
+      setShowAdd(false)
+      setNewName('')
+      setNewProvider('anthropic')
+      setNewKey('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteApiKey(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['apiKeys'] })
+      toast.success('API key removed')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => toggleApiKey(id, isActive),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['apiKeys'] })
+      toast.success('API key updated')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const handleTest = async (id: string) => {
+    setTestingId(id)
+    try {
+      const result = await testApiKeyById(id)
+      if (result.valid) {
+        toast.success(`Key is valid! ${result.model ? `Model: ${result.model}` : result.modelCount ? `${result.modelCount} models available` : ''}`)
+      } else {
+        toast.error(`Key test failed: ${result.error || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setTestingId(null)
+    }
+  }
+
+  const providerColors: Record<string, string> = {
+    anthropic: 'text-orange-400 border-orange-500/30 bg-orange-500/10',
+    openai: 'text-green-400 border-green-500/30 bg-green-500/10',
+    custom: 'text-blue-400 border-blue-500/30 bg-blue-500/10',
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-24">
+        <div className="w-5 h-5 border-2 border-accent-purple border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
-      {[
-        {
-          name: 'Anthropic (Claude)',
-          envKey: 'ANTHROPIC_API_KEY',
-          models: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5'],
-          color: 'text-orange-400',
-        },
-        {
-          name: 'OpenAI',
-          envKey: 'OPENAI_API_KEY',
-          models: ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
-          color: 'text-green-400',
-        },
-      ].map((provider) => (
-        <div key={provider.name} className="bg-dark-bg border border-dark-border rounded-xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className={`text-sm font-semibold ${provider.color}`}>{provider.name}</p>
-            <span className="text-xs text-slate-500 font-mono">{provider.envKey}</span>
-          </div>
-          <p className="text-xs text-slate-500 mb-2">
-            Set in your .env file on the server. Available models:
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {provider.models.map((m) => (
-              <span key={m} className="text-xs px-2 py-0.5 bg-dark-card border border-dark-border rounded text-slate-400 font-mono">
-                {m}
+      {/* Existing keys */}
+      {keys.length === 0 ? (
+        <div className="text-center py-6">
+          <Key className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+          <p className="text-sm text-slate-500">No API keys stored yet</p>
+          <p className="text-xs text-slate-600 mt-1">Keys are encrypted at rest with AES-256-GCM</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {keys.map((k) => (
+            <div key={k.id} className="flex items-center gap-3 px-4 py-3 bg-dark-bg border border-dark-border rounded-xl">
+              <span className={`text-xs px-2 py-0.5 rounded border font-medium ${providerColors[k.provider] || providerColors.custom}`}>
+                {k.provider}
               </span>
-            ))}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-slate-200 truncate">{k.name}</p>
+                <p className="text-xs text-slate-500 font-mono">••••••••{k.keyHint}</p>
+              </div>
+              <button
+                onClick={() => toggleMutation.mutate({ id: k.id, isActive: !k.isActive })}
+                className="text-slate-400 hover:text-slate-200 transition-colors"
+                title={k.isActive ? 'Disable' : 'Enable'}
+              >
+                {k.isActive ? (
+                  <ToggleRight className="w-5 h-5 text-green-400" />
+                ) : (
+                  <ToggleLeft className="w-5 h-5 text-slate-500" />
+                )}
+              </button>
+              <button
+                onClick={() => handleTest(k.id)}
+                disabled={testingId === k.id}
+                className="p-1.5 text-slate-400 hover:text-accent-purple transition-colors disabled:opacity-50"
+                title="Test key"
+              >
+                {testingId === k.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FlaskConical className="w-4 h-4" />
+                )}
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate(k.id)}
+                disabled={deleteMutation.isPending}
+                className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
+                title="Delete key"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add new key */}
+      {showAdd ? (
+        <div className="bg-dark-bg border border-dark-border rounded-xl p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Name</label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="My Anthropic Key"
+                className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple/50"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Provider</label>
+              <select
+                value={newProvider}
+                onChange={(e) => setNewProvider(e.target.value)}
+                className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50"
+              >
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">API Key</label>
+            <input
+              type="password"
+              value={newKey}
+              onChange={(e) => setNewKey(e.target.value)}
+              placeholder="sk-..."
+              className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-accent-purple/50"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => addMutation.mutate()}
+              disabled={!newName || !newKey || addMutation.isPending}
+              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+            >
+              {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+              Encrypt & Save
+            </button>
+            <button
+              onClick={() => { setShowAdd(false); setNewKey('') }}
+              className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 text-sm rounded-lg border border-dark-border"
+            >
+              Cancel
+            </button>
           </div>
         </div>
-      ))}
+      ) : (
+        <button
+          onClick={() => setShowAdd(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-dark-bg border border-dashed border-dark-border rounded-xl text-sm text-slate-400 hover:text-slate-200 hover:border-accent-purple/50 transition-colors w-full justify-center"
+        >
+          <Plus className="w-4 h-4" />
+          Add API Key
+        </button>
+      )}
 
-      <p className="text-xs text-slate-600">
-        To change API keys, edit your .env file and restart the server.
-      </p>
+      <div className="bg-dark-bg border border-dark-border rounded-xl p-3">
+        <p className="text-xs text-slate-500">
+          <Shield className="w-3 h-3 inline mr-1" />
+          Keys are encrypted with AES-256-GCM at rest. Only the last 4 characters are visible.
+          Fallback: keys from .env file are still used if no DB key exists for a provider.
+        </p>
+      </div>
     </div>
   )
 }
@@ -338,8 +516,8 @@ export default function SettingsPage() {
         <SecuritySection />
       </Section>
 
-      <Section title="AI Providers" description="Configure your AI API keys">
-        <AIProvidersSection />
+      <Section title="API Keys" description="Securely manage your AI provider API keys">
+        <ApiKeysSection />
       </Section>
 
       <Section

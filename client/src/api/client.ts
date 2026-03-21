@@ -39,6 +39,7 @@ export interface Organization {
   description: string | null
   industry: string | null
   goals: string[] | null
+  status?: 'active' | 'paused'
   createdAt: string
   updatedAt: string
 }
@@ -97,6 +98,7 @@ export interface Run {
   agentId: string
   agentName?: string
   agentType?: string
+  agentRole?: string
   scheduleId: string | null
   status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
   startedAt: string | null
@@ -104,11 +106,35 @@ export interface Run {
   input?: unknown
   output?: unknown
   tokensUsed: number
+  inputTokens?: number
+  outputTokens?: number
   costUsd: string | number
+  model?: string
+  durationMs?: number
   triggeredBy: string
   error: string | null
   createdAt: string
   toolCalls?: ToolCall[]
+  auditLogs?: AuditLog[]
+}
+
+export interface ApiKeyEntry {
+  id: string
+  name: string
+  provider: string
+  keyHint: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SharedMemoryEntry {
+  id: string
+  organizationId: string
+  key: string
+  value: string
+  createdByAgentId: string | null
+  updatedAt: string
 }
 
 export interface ToolCall {
@@ -554,5 +580,43 @@ export const addTelegramCommandRoute = (command: string, agentId: string) =>
 
 export const removeTelegramCommandRoute = (command: string) =>
   api.delete<{ success: boolean; commandRoutes: Record<string, string> }>(`/settings/telegram-routes/${encodeURIComponent(command)}`).then((r) => r.data)
+
+// ─── API Keys (Settings) ─────────────────────────────────────────────────────
+
+export const getApiKeys = () =>
+  api.get<{ data: ApiKeyEntry[] }>('/settings/api-keys').then((r) => r.data)
+
+export const addApiKey = (name: string, provider: string, key: string) =>
+  api.post<{ data: ApiKeyEntry }>('/settings/api-keys', { name, provider, key }).then((r) => r.data)
+
+export const deleteApiKey = (id: string) =>
+  api.delete<{ success: boolean }>(`/settings/api-keys/${id}`).then((r) => r.data)
+
+export const testApiKeyById = (id: string) =>
+  api.post<{ valid: boolean; model?: string; modelCount?: number; error?: string }>(`/settings/api-keys/${id}/test`).then((r) => r.data)
+
+export const toggleApiKey = (id: string, isActive: boolean) =>
+  api.patch<{ success: boolean }>(`/settings/api-keys/${id}`, { isActive }).then((r) => r.data)
+
+// ─── Heartbeat ───────────────────────────────────────────────────────────────
+
+export const getHeartbeat = (sinceMin = 5, orgId?: string) =>
+  api.get<{ data: Run[] }>('/runs/heartbeat', { params: { sinceMin, orgId } }).then((r) => r.data)
+
+// ─── Organization Status ─────────────────────────────────────────────────────
+
+export const updateOrgStatus = (orgId: string, status: 'active' | 'paused') =>
+  api.patch<{ data: Organization }>(`/business/organizations/${orgId}/status`, { status }).then((r) => r.data)
+
+// ─── Shared Memory (Organization) ────────────────────────────────────────────
+
+export const getOrgMemory = (orgId: string) =>
+  api.get<{ data: SharedMemoryEntry[]; total: number }>(`/business/organizations/${orgId}/memory`).then((r) => r.data)
+
+export const setOrgMemory = (orgId: string, key: string, value: string) =>
+  api.post<{ data: SharedMemoryEntry }>(`/business/organizations/${orgId}/memory`, { key, value }).then((r) => r.data)
+
+export const deleteOrgMemory = (orgId: string, key: string) =>
+  api.delete<{ success: boolean }>(`/business/organizations/${orgId}/memory/${encodeURIComponent(key)}`).then((r) => r.data)
 
 export default api

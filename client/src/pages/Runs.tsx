@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, XCircle, PlayCircle } from 'lucide-react'
-import { getRuns, getAgents, cancelRun, Run } from '../api/client'
+import { ChevronDown, ChevronRight, XCircle, PlayCircle, Zap, Clock, Bot, Wrench, ScrollText } from 'lucide-react'
+import { getRuns, getRun, getAgents, cancelRun, Run } from '../api/client'
 import { useToast } from '../components/Toaster'
 import StatusBadge from '../components/StatusBadge'
 
@@ -26,10 +26,25 @@ function formatCost(cost: string | number): string {
   return `$${n.toFixed(4)}`
 }
 
+function formatDurationMs(ms?: number): string {
+  if (!ms) return '-'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60000).toFixed(1)}m`
+}
+
 function RunRow({ run }: { run: Run }) {
   const [expanded, setExpanded] = useState(false)
   const qc = useQueryClient()
   const toast = useToast()
+
+  // Fetch full detail (with toolCalls + auditLogs) when expanded
+  const { data: detailData } = useQuery({
+    queryKey: ['run', run.id],
+    queryFn: () => getRun(run.id),
+    enabled: expanded,
+  })
+  const detail = detailData?.data
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelRun(run.id),
@@ -41,6 +56,7 @@ function RunRow({ run }: { run: Run }) {
   })
 
   const canCancel = run.status === 'pending' || run.status === 'running'
+  const displayRun = detail || run
 
   return (
     <>
@@ -60,7 +76,7 @@ function RunRow({ run }: { run: Run }) {
         </td>
         <td className="px-5 py-3">
           <p className="text-slate-200 text-sm">{run.agentName ?? run.agentId.slice(0, 8)}</p>
-          <p className="text-xs text-slate-500">{run.agentType}</p>
+          <p className="text-xs text-slate-500">{run.agentType}{run.model ? ` · ${run.model}` : ''}</p>
         </td>
         <td className="px-5 py-3">
           <StatusBadge status={run.status} />
@@ -68,7 +84,7 @@ function RunRow({ run }: { run: Run }) {
         <td className="px-5 py-3 text-xs text-slate-400 capitalize">{run.triggeredBy}</td>
         <td className="px-5 py-3 text-xs text-slate-400">{formatDate(run.startedAt)}</td>
         <td className="px-5 py-3 text-xs text-slate-400 font-mono">
-          {formatDuration(run.startedAt, run.completedAt)}
+          {run.durationMs ? formatDurationMs(run.durationMs) : formatDuration(run.startedAt, run.completedAt)}
         </td>
         <td className="px-5 py-3 text-xs text-slate-400 font-mono">
           {run.tokensUsed > 0 ? run.tokensUsed.toLocaleString() : '-'}
@@ -92,44 +108,119 @@ function RunRow({ run }: { run: Run }) {
 
       {expanded && (
         <tr className="border-b border-dark-border bg-dark-bg/60">
-          <td colSpan={9} className="px-10 py-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {run.input !== undefined && run.input !== null && (
+          <td colSpan={9} className="px-6 py-4 space-y-4">
+            {/* Metadata bar */}
+            <div className="flex flex-wrap gap-4 text-xs">
+              {displayRun.model && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-dark-card border border-dark-border rounded-lg text-slate-300">
+                  <Zap className="w-3 h-3 text-accent-purple" /> {displayRun.model}
+                </div>
+              )}
+              {displayRun.durationMs && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-dark-card border border-dark-border rounded-lg text-slate-300">
+                  <Clock className="w-3 h-3 text-blue-400" /> {formatDurationMs(displayRun.durationMs)}
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-dark-card border border-dark-border rounded-lg text-slate-300">
+                <Bot className="w-3 h-3 text-green-400" /> {displayRun.triggeredBy}
+              </div>
+            </div>
+
+            {/* Token breakdown */}
+            {(displayRun.inputTokens || displayRun.outputTokens || displayRun.tokensUsed > 0) && (
+              <div className="bg-dark-card border border-dark-border rounded-lg p-3">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Token Usage</p>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-lg font-bold text-blue-400">{(displayRun.inputTokens || 0).toLocaleString()}</p>
+                    <p className="text-xs text-slate-500">Input</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-purple-400">{(displayRun.outputTokens || 0).toLocaleString()}</p>
+                    <p className="text-xs text-slate-500">Output</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-slate-300">{displayRun.tokensUsed.toLocaleString()}</p>
+                    <p className="text-xs text-slate-500">Total</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Input / Output / Error panels */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {displayRun.input != null && (
                 <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
-                    Input
-                  </p>
-                  <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono">
-                    {JSON.stringify(run.input, null, 2)}
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Input</p>
+                  <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-48 font-mono">
+                    {typeof displayRun.input === 'string' ? displayRun.input : JSON.stringify(displayRun.input, null, 2)}
                   </pre>
                 </div>
               )}
-              {run.output !== undefined && run.output !== null && (
+              {displayRun.output != null && (
                 <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
-                    Output
-                  </p>
-                  <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-40 font-mono">
-                    {typeof run.output === 'string'
-                      ? run.output
-                      : JSON.stringify(run.output, null, 2)}
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Output</p>
+                  <pre className="text-xs text-slate-300 bg-dark-bg border border-dark-border rounded-lg p-3 overflow-auto max-h-48 font-mono">
+                    {typeof displayRun.output === 'string' ? displayRun.output : JSON.stringify(displayRun.output, null, 2)}
                   </pre>
                 </div>
-              )}
-              {run.error && (
-                <div>
-                  <p className="text-xs font-medium text-red-500 uppercase tracking-wider mb-2">
-                    Error
-                  </p>
-                  <pre className="text-xs text-red-300 bg-red-500/5 border border-red-500/20 rounded-lg p-3 overflow-auto max-h-40 font-mono">
-                    {run.error}
-                  </pre>
-                </div>
-              )}
-              {run.input === undefined && run.output === undefined && !run.error && (
-                <p className="text-xs text-slate-500">No details available for this run.</p>
               )}
             </div>
+
+            {displayRun.error && (
+              <div>
+                <p className="text-xs font-medium text-red-500 uppercase tracking-wider mb-2">Error</p>
+                <pre className="text-xs text-red-300 bg-red-500/5 border border-red-500/20 rounded-lg p-3 overflow-auto max-h-40 font-mono">
+                  {displayRun.error}
+                </pre>
+              </div>
+            )}
+
+            {/* Tool Calls */}
+            {detail?.toolCalls && detail.toolCalls.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Wrench className="w-3 h-3" /> Tool Calls ({detail.toolCalls.length})
+                </p>
+                <div className="space-y-1.5">
+                  {detail.toolCalls.map((tc: any) => (
+                    <div key={tc.id} className="flex items-center gap-3 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-xs">
+                      <span className="font-mono text-accent-purple font-medium">{tc.toolName}</span>
+                      {tc.durationMs > 0 && <span className="text-slate-500">{tc.durationMs}ms</span>}
+                      <span className="text-slate-600 truncate flex-1">
+                        {tc.input ? (typeof tc.input === 'string' ? tc.input.slice(0, 80) : JSON.stringify(tc.input).slice(0, 80)) : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Audit Logs */}
+            {detail?.auditLogs && detail.auditLogs.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <ScrollText className="w-3 h-3" /> Audit Log ({detail.auditLogs.length})
+                </p>
+                <div className="space-y-1">
+                  {detail.auditLogs.map((log: any) => (
+                    <div key={log.id} className="flex items-center gap-3 px-3 py-1.5 text-xs">
+                      <span className="text-slate-600 shrink-0">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                      <span className="font-medium text-slate-400">{log.eventType}</span>
+                      {log.data && (
+                        <span className="text-slate-600 truncate">
+                          {typeof log.data === 'string' ? log.data.slice(0, 60) : JSON.stringify(log.data).slice(0, 60)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {displayRun.input == null && displayRun.output == null && !displayRun.error && (
+              <p className="text-xs text-slate-500">No details available for this run.</p>
+            )}
           </td>
         </tr>
       )}

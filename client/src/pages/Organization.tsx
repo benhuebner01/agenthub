@@ -3,11 +3,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Building2,
   Play,
+  Pause,
   CheckCircle,
   XCircle,
   Users,
   Sparkles,
   ClipboardList,
+  Pencil,
+  Save,
+  Brain,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -17,9 +23,17 @@ import {
   approveProposal,
   rejectProposal,
   runCeo,
+  updateOrgStatus,
+  getAgents,
+  updateAgent,
+  getOrgMemory,
+  setOrgMemory,
+  deleteOrgMemory,
   OrgChartNode,
   Proposal,
   Organization,
+  Agent,
+  SharedMemoryEntry,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
 
@@ -222,11 +236,49 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
 function AgentDetailPanel({
   node,
   onClose,
+  editMode,
+  allAgents,
+  orgId,
 }: {
   node: OrgChartNode
   onClose: () => void
+  editMode: boolean
+  allAgents: Agent[]
+  orgId: string | null
 }) {
+  const qc = useQueryClient()
+  const toast = useToast()
   const styles = ROLE_STYLES[node.role] || ROLE_STYLES.worker
+  const [assignAgent, setAssignAgent] = useState('')
+  const [newParent, setNewParent] = useState('')
+
+  const assignMutation = useMutation({
+    mutationFn: (agentId: string) => updateAgent(agentId, {
+      organizationId: orgId || undefined,
+      role: node.role as any,
+      jobDescription: node.jobDescription || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent assigned to role')
+      setAssignAgent('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const changeParentMutation = useMutation({
+    mutationFn: () => updateAgent(node.id, { parentAgentId: newParent || undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      toast.success('Parent updated')
+      setNewParent('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  // Available agents not yet in org
+  const unassignedAgents = allAgents.filter((a) => !a.organizationId && a.type !== 'internal')
 
   return (
     <div className="fixed inset-y-0 right-0 w-80 bg-dark-sidebar border-l border-dark-border z-50 flex flex-col shadow-2xl">
@@ -282,6 +334,168 @@ function AgentDetailPanel({
             </div>
           </div>
         )}
+
+        {/* Edit Mode: Assign Agent / Change Parent */}
+        {editMode && (
+          <div className="border-t border-dark-border pt-4 space-y-4">
+            <p className="text-xs font-medium text-accent-purple uppercase tracking-wider">Edit Mode</p>
+
+            {/* Replace with existing agent */}
+            {unassignedAgents.length > 0 && (
+              <div>
+                <p className="text-xs text-slate-400 mb-1.5">Assign existing agent to this role</p>
+                <div className="flex gap-2">
+                  <select
+                    value={assignAgent}
+                    onChange={(e) => setAssignAgent(e.target.value)}
+                    className="flex-1 px-2 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-xs text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                  >
+                    <option value="">Select agent...</option>
+                    {unassignedAgents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.type})</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => assignAgent && assignMutation.mutate(assignAgent)}
+                    disabled={!assignAgent || assignMutation.isPending}
+                    className="px-3 py-1.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-xs rounded-lg"
+                  >
+                    Assign
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Change parent */}
+            <div>
+              <p className="text-xs text-slate-400 mb-1.5">Change parent (reports to)</p>
+              <div className="flex gap-2">
+                <select
+                  value={newParent}
+                  onChange={(e) => setNewParent(e.target.value)}
+                  className="flex-1 px-2 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-xs text-slate-200 focus:outline-none focus:border-accent-purple/50"
+                >
+                  <option value="">No parent (root)</option>
+                  {allAgents
+                    .filter((a) => a.organizationId === orgId && a.id !== node.id)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                    ))}
+                </select>
+                <button
+                  onClick={() => changeParentMutation.mutate()}
+                  disabled={changeParentMutation.isPending}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs rounded-lg"
+                >
+                  <Save className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Configure link */}
+            <a
+              href={`/agents`}
+              className="flex items-center gap-1.5 text-xs text-accent-purple hover:text-purple-300 transition-colors"
+            >
+              <Pencil className="w-3 h-3" /> Configure agent settings
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Shared Memory Panel ────────────────────────────────────────────────────
+
+function SharedMemoryPanel({ orgId }: { orgId: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [newKey, setNewKey] = useState('')
+  const [newValue, setNewValue] = useState('')
+
+  const { data: memData } = useQuery({
+    queryKey: ['orgMemory', orgId],
+    queryFn: () => getOrgMemory(orgId),
+  })
+
+  const entries: SharedMemoryEntry[] = memData?.data ?? []
+
+  const addMutation = useMutation({
+    mutationFn: () => setOrgMemory(orgId, newKey, newValue),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgMemory', orgId] })
+      toast.success('Memory entry saved')
+      setNewKey('')
+      setNewValue('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (key: string) => deleteOrgMemory(orgId, key),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgMemory', orgId] })
+      toast.success('Memory entry removed')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  return (
+    <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
+      <div className="px-4 py-4 border-b border-dark-border flex items-center gap-2">
+        <Brain className="w-4 h-4 text-accent-purple" />
+        <h2 className="text-base font-semibold text-white">Shared Memory</h2>
+        <span className="text-xs text-slate-500 ml-auto">{entries.length} entries</span>
+      </div>
+
+      <div className="p-4 space-y-2">
+        {entries.length === 0 ? (
+          <p className="text-xs text-slate-500 text-center py-4">
+            No shared memory yet. Add entries that all agents in this org can access.
+          </p>
+        ) : (
+          entries.map((e) => (
+            <div key={e.id} className="flex items-start gap-2 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-mono font-medium text-accent-purple">{e.key}</p>
+                <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{e.value}</p>
+              </div>
+              <button
+                onClick={() => deleteMutation.mutate(e.key)}
+                className="p-1 text-slate-600 hover:text-red-400 transition-colors shrink-0"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          ))
+        )}
+
+        {/* Add new entry */}
+        <div className="border-t border-dark-border pt-3 space-y-2">
+          <input
+            type="text"
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            placeholder="Key (e.g. brand_voice)"
+            className="w-full px-3 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-purple/50"
+          />
+          <textarea
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            placeholder="Value..."
+            rows={2}
+            className="w-full px-3 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-accent-purple/50"
+          />
+          <button
+            onClick={() => addMutation.mutate()}
+            disabled={!newKey || !newValue || addMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-xs rounded-lg transition-colors w-full justify-center"
+          >
+            <Plus className="w-3 h-3" />
+            Add Memory Entry
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -292,10 +506,12 @@ function AgentDetailPanel({
 export default function OrganizationPage() {
   const navigate = useNavigate()
   const toast = useToast()
+  const qc = useQueryClient()
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<OrgChartNode | null>(null)
   const [ceoInput, setCeoInput] = useState('')
   const [showCeoRun, setShowCeoRun] = useState(false)
+  const [editMode, setEditMode] = useState(false)
 
   const { data: orgsData, isLoading: orgsLoading } = useQuery({
     queryKey: ['organizations'],
@@ -319,9 +535,16 @@ export default function OrganizationPage() {
     refetchInterval: 15_000,
   })
 
+  const { data: agentsData } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => getAgents(),
+  })
+
+  const allAgents: Agent[] = agentsData?.data ?? []
   const pendingProposals = proposalsData?.data ?? []
   const chart = chartData?.data?.chart ?? []
   const org = chartData?.data?.organization ?? null
+  const orgStatus = (org as any)?.status || 'active'
 
   const ceoRunMutation = useMutation({
     mutationFn: () => runCeo(activeOrgId!, ceoInput),
@@ -329,6 +552,16 @@ export default function OrganizationPage() {
       toast.success('CEO agent ran successfully. Check for new proposals.')
       setShowCeoRun(false)
       setCeoInput('')
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: (status: 'active' | 'paused') => updateOrgStatus(activeOrgId!, status),
+    onSuccess: (_, status) => {
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      qc.invalidateQueries({ queryKey: ['organizations'] })
+      toast.success(status === 'paused' ? 'Organization paused' : 'Organization resumed')
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -367,13 +600,20 @@ export default function OrganizationPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Organization</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-white">Organization</h1>
+            {orgStatus === 'paused' && (
+              <span className="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded-full">
+                Paused
+              </span>
+            )}
+          </div>
           <p className="text-sm text-slate-400 mt-1">
             {org ? org.name : 'Loading...'}
             {org?.industry && ` · ${org.industry}`}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {organizations.length > 1 && (
             <select
               value={activeOrgId || ''}
@@ -385,9 +625,39 @@ export default function OrganizationPage() {
               ))}
             </select>
           )}
+
+          {/* Pause/Resume Toggle */}
+          <button
+            onClick={() => statusMutation.mutate(orgStatus === 'active' ? 'paused' : 'active')}
+            disabled={statusMutation.isPending}
+            className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg border transition-colors ${
+              orgStatus === 'active'
+                ? 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                : 'bg-green-500/10 hover:bg-green-500/20 text-green-400 border-green-500/30'
+            }`}
+            title={orgStatus === 'active' ? 'Pause all org work' : 'Resume org work'}
+          >
+            {orgStatus === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {orgStatus === 'active' ? 'Pause' : 'Resume'}
+          </button>
+
+          {/* Edit Mode Toggle */}
+          <button
+            onClick={() => setEditMode((v) => !v)}
+            className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg border transition-colors ${
+              editMode
+                ? 'bg-accent-purple/20 text-accent-purple border-accent-purple/30'
+                : 'bg-white/5 text-slate-400 border-dark-border hover:text-slate-200'
+            }`}
+          >
+            <Pencil className="w-4 h-4" />
+            {editMode ? 'Done' : 'Edit'}
+          </button>
+
           <button
             onClick={() => setShowCeoRun(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 text-sm font-medium rounded-lg border border-yellow-500/30 transition-colors"
+            disabled={orgStatus === 'paused'}
+            className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/20 hover:bg-yellow-500/30 disabled:opacity-50 text-yellow-300 text-sm font-medium rounded-lg border border-yellow-500/30 transition-colors"
           >
             <Play className="w-4 h-4" />
             Run CEO
@@ -479,8 +749,8 @@ export default function OrganizationPage() {
           </div>
         </div>
 
-        {/* Proposals Panel */}
-        <div className="xl:col-span-1">
+        {/* Right Column: Proposals + Shared Memory */}
+        <div className="xl:col-span-1 space-y-6">
           <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
             <div className="px-4 py-4 border-b border-dark-border flex items-center justify-between">
               <h2 className="text-base font-semibold text-white">Proposals</h2>
@@ -505,6 +775,9 @@ export default function OrganizationPage() {
               </div>
             )}
           </div>
+
+          {/* Shared Memory */}
+          {activeOrgId && <SharedMemoryPanel orgId={activeOrgId} />}
         </div>
       </div>
 
@@ -515,7 +788,13 @@ export default function OrganizationPage() {
             className="fixed inset-0 bg-black/20 z-40"
             onClick={() => setSelectedNode(null)}
           />
-          <AgentDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+          <AgentDetailPanel
+            node={selectedNode}
+            onClose={() => setSelectedNode(null)}
+            editMode={editMode}
+            allAgents={allAgents}
+            orgId={activeOrgId}
+          />
         </>
       )}
     </div>
