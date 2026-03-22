@@ -352,23 +352,55 @@ async function executeClaudeCodeAgent(config: Record<string, unknown>, input: un
 }
 
 // ─── OpenAI Codex CLI Agent ───────────────────────────────────────────────────
+// Codex CLI usage: codex [OPTIONS] [PROMPT]  or  codex exec [OPTIONS] <PROMPT>
+//   Approval modes: --full-auto | --suggest | --ask (default)
+//   Useful flags: --quiet (suppress interactive UI), --model <model>
+//   NOTE: Codex CLI does NOT support --output-format. Use exec subcommand for
+//   non-interactive programmatic use, and --quiet to suppress TUI.
 
 async function executeOpenAICodexAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const { execSync } = require('child_process');
   const workDir = (config.workDir as string) || process.cwd();
-  const mode = (config.mode as string) || 'full-auto';
+  const mode = (config.mode as string) || 'full-auto'; // 'full-auto' | 'suggest' | 'ask'
+  const model = (config.model as string) || '';
   const prompt = typeof input === 'string' ? input : JSON.stringify(input);
 
   const env = { ...process.env };
   if (config.apiKeyOverride) (env as any).OPENAI_API_KEY = config.apiKeyOverride;
 
-  let cmd = `codex --${mode} --output-format json ${JSON.stringify(prompt)}`;
+  // Build command: use `codex exec` for non-interactive programmatic execution
+  // --quiet suppresses the TUI, --full-auto skips all approval prompts
+  const parts: string[] = ['codex', 'exec'];
+  parts.push(`--${mode}`);
+  parts.push('--quiet');
+  if (model) parts.push('--model', model);
+  parts.push(JSON.stringify(prompt));
+
+  const cmd = parts.join(' ');
 
   try {
-    const stdout = execSync(cmd, { cwd: workDir, timeout: 120000, encoding: 'utf8', env });
-    return { success: true, output: JSON.parse(stdout), tokensUsed: 0, costUsd: 0 };
+    const stdout = execSync(cmd, {
+      cwd: workDir,
+      timeout: (config.timeoutMs as number) || 180000,
+      encoding: 'utf8',
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'], // capture all streams, no TTY
+    });
+
+    // Codex exec returns plain text output — try JSON parse, fall back to raw text
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      parsed = stdout.trim();
+    }
+
+    return { success: true, output: parsed, tokensUsed: 0, costUsd: 0 };
   } catch (err: any) {
-    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: err.message };
+    // Extract useful error info from stderr if available
+    const stderr = err.stderr ? String(err.stderr).trim() : '';
+    const errMsg = stderr || err.message || 'Codex execution failed';
+    return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: errMsg };
   }
 }
 

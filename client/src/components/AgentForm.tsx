@@ -1394,9 +1394,9 @@ function OpenAICodexConfig({
         <div>
           <label className={LABEL_CLASS}>Mode</label>
           <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT_CLASS}>
-            <option value="full-auto">full-auto — autonomous</option>
-            <option value="auto-edit">auto-edit — edit files automatically</option>
-            <option value="suggest">suggest — suggest only</option>
+            <option value="full-auto">full-auto — autonomous, no approvals</option>
+            <option value="suggest">suggest — propose changes only</option>
+            <option value="ask">ask — ask before each action</option>
           </select>
         </div>
       )}
