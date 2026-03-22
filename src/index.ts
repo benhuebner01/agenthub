@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import type { CorsOptions } from 'cors';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 
@@ -30,7 +31,7 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // ─── P0-3: CORS Allowlist ────────────────────────────────────────────────────
 // In production, only allow configured origins. In dev, allow all.
-const corsOptions: cors.CorsOptions = (() => {
+const corsOptions: CorsOptions = (() => {
   const originsEnv = process.env.CORS_ORIGINS; // comma-separated: "https://example.com,https://app.example.com"
   if (originsEnv) {
     const allowedOrigins = originsEnv.split(',').map(o => o.trim()).filter(Boolean);

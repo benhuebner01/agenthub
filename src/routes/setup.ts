@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db, mode } from '../db/index';
 import { agents } from '../db/schema';
 import axios from 'axios';
-import { getSetting, setSetting, storeApiKeyEncrypted } from './settings';
+import { getSetting, setSetting, storeApiKeyEncrypted, getApiKeyForProvider } from './settings';
 
 const router = Router();
 
@@ -11,8 +11,8 @@ const router = Router();
 router.get('/status', async (req: Request, res: Response) => {
   try {
     const setupComplete = await getSetting('setup_complete');
-    const hasAnthropicKey = !!(await getSetting('anthropic_api_key')) || !!process.env.ANTHROPIC_API_KEY;
-    const hasOpenAIKey = !!(await getSetting('openai_api_key')) || !!process.env.OPENAI_API_KEY;
+    const hasAnthropicKey = !!(await getApiKeyForProvider('anthropic')) || !!process.env.ANTHROPIC_API_KEY;
+    const hasOpenAIKey = !!(await getApiKeyForProvider('openai')) || !!process.env.OPENAI_API_KEY;
     const hasTelegramToken = !!(await getSetting('telegram_bot_token')) || !!process.env.TELEGRAM_BOT_TOKEN;
 
     // Check if any agent exists

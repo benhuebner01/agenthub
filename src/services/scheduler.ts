@@ -169,7 +169,7 @@ async function startBullMQScheduler(): Promise<void> {
     { connection }
   );
 
-  bullWorker.on('failed', (job, err) => {
+  bullWorker.on('failed', (job: any, err: Error) => {
     console.error(`[Scheduler][BullMQ] Job ${job?.id} failed:`, err);
   });
 
