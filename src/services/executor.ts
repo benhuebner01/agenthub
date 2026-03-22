@@ -391,6 +391,12 @@ async function executeOpenAICodexAgent(config: Record<string, unknown>, input: u
   const sandbox = config.sandbox as string;
   if (sandbox) parts.push('-s', sandbox);
 
+  // Working directory — use -C to set workspace root
+  parts.push('-C', workDir);
+
+  // Allow running outside git repos (workDir may not be a git repo)
+  parts.push('--skip-git-repo-check');
+
   // JSON output for structured parsing
   parts.push('--json');
 
