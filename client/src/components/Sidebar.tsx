@@ -14,6 +14,7 @@ import {
   Sparkles,
   Activity,
   Brain,
+  Target,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { getProposals } from '../api/client'
@@ -22,6 +23,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/agents', icon: Bot, label: 'Agents', end: false },
   { to: '/organization', icon: Building2, label: 'Organization', end: false },
+  { to: '/goals', icon: Target, label: 'Goals', end: false },
   { to: '/schedules', icon: Clock, label: 'Schedules', end: false },
   { to: '/runs', icon: PlayCircle, label: 'Runs', end: false },
   { to: '/heartbeat', icon: Activity, label: 'Heartbeat', end: false },

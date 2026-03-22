@@ -16,6 +16,7 @@ import internalAgentRouter from './routes/internal-agent';
 import businessRouter from './routes/business';
 import costsRouter from './routes/costs';
 import settingsRouter from './routes/settings';
+import goalsRouter from './routes/goals';
 
 // Services
 import { startScheduler, getSchedulerMode } from './services/scheduler';
@@ -199,6 +200,7 @@ app.use('/api/runs', executionLimiter, runsRouter);
 app.use('/api/business', businessRouter);
 app.use('/api/costs', costsRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/goals', goalsRouter);
 
 // Note: Proposals are served at /api/business/proposals by the business router
 
@@ -428,6 +430,54 @@ async function runMigrations(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_ceo_prelaunch_messages_org_id ON ceo_prelaunch_messages(organization_id);
+
+        CREATE TABLE IF NOT EXISTS goals (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          priority TEXT NOT NULL DEFAULT 'medium',
+          status TEXT NOT NULL DEFAULT 'draft',
+          success_criteria JSONB,
+          constraints JSONB,
+          deadline TEXT,
+          measurable_target TEXT,
+          progress INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_organization_id ON goals(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_goals_agent_id ON goals(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
+
+        CREATE TABLE IF NOT EXISTS plan_steps (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          goal_id UUID NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+          assigned_agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          type TEXT NOT NULL DEFAULT 'action',
+          "order" INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'pending',
+          depends_on JSONB,
+          input JSONB,
+          output JSONB,
+          artifacts JSONB,
+          verification JSONB,
+          verification_result JSONB,
+          retries INTEGER NOT NULL DEFAULT 0,
+          max_retries INTEGER NOT NULL DEFAULT 3,
+          run_id UUID REFERENCES runs(id) ON DELETE SET NULL,
+          started_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_goal_id ON plan_steps(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_assigned_agent_id ON plan_steps(assigned_agent_id);
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
       `);
 
       // Add new columns to agents if they don't exist
@@ -630,6 +680,52 @@ async function runMigrations(): Promise<void> {
           created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_ceo_prelaunch_messages_org_id ON ceo_prelaunch_messages(organization_id);
+        CREATE TABLE IF NOT EXISTS goals (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          priority TEXT NOT NULL DEFAULT 'medium',
+          status TEXT NOT NULL DEFAULT 'draft',
+          success_criteria TEXT,
+          constraints TEXT,
+          deadline TEXT,
+          measurable_target TEXT,
+          progress INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_organization_id ON goals(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_goals_agent_id ON goals(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
+        CREATE TABLE IF NOT EXISTS plan_steps (
+          id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+          assigned_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          type TEXT NOT NULL DEFAULT 'action',
+          "order" INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'pending',
+          depends_on TEXT,
+          input TEXT,
+          output TEXT,
+          artifacts TEXT,
+          verification TEXT,
+          verification_result TEXT,
+          retries INTEGER NOT NULL DEFAULT 0,
+          max_retries INTEGER NOT NULL DEFAULT 3,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_goal_id ON plan_steps(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_assigned_agent_id ON plan_steps(assigned_agent_id);
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
       `);
     } catch (migrateErr) {
       console.warn('[DB] Migration warning (tables may already exist):', (migrateErr as Error).message);

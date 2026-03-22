@@ -2,15 +2,47 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AgentHub Goal",
   "type": "object",
-  "required": ["id", "text", "priority", "status"],
+  "required": ["id", "title", "priority", "status"],
   "properties": {
     "id": { "type": "string" },
-    "text": { "type": "string", "description": "The goal description" },
-    "priority": { "type": "string", "enum": ["high", "medium", "low"] },
-    "status": { "type": "string", "enum": ["active", "achieved", "abandoned"] },
-    "measurable_target": { "type": "string" },
+    "title": { "type": "string", "description": "Short goal title" },
+    "description": { "type": "string", "description": "Detailed goal description" },
+    "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+    "status": { "type": "string", "enum": ["draft", "active", "in_progress", "blocked", "achieved", "abandoned"] },
+    "organizationId": { "type": "string" },
+    "agentId": { "type": "string" },
+    "successCriteria": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array", "items": { "type": "string" } },
     "deadline": { "type": "string", "format": "date" },
-    "success_criteria": { "type": "array", "items": { "type": "string" } },
-    "constraints": { "type": "array", "items": { "type": "string" } }
+    "measurableTarget": { "type": "string" },
+    "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "type", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "type": { "type": "string", "enum": ["research", "reasoning", "generation", "validation", "approval", "action"] },
+          "order": { "type": "integer" },
+          "status": { "type": "string", "enum": ["pending", "ready", "running", "blocked", "failed", "verified", "completed", "skipped"] },
+          "dependsOn": { "type": "array", "items": { "type": "string" } },
+          "assignedAgentId": { "type": "string" },
+          "input": { "type": "object" },
+          "output": { "type": "object" },
+          "artifacts": { "type": "array" },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "checks": { "type": "array", "items": { "type": "string" } },
+              "schema": { "type": "string" }
+            }
+          },
+          "maxRetries": { "type": "integer" }
+        }
+      }
+    }
   }
 }

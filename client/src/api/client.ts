@@ -765,4 +765,79 @@ export const updateAgentTacit = (agentId: string, tacitId: string, data: Partial
 export const deleteAgentTacit = (agentId: string, tacitId: string) =>
   api.delete<{ message: string }>(`/agents/${agentId}/tacit/${tacitId}`).then((r) => r.data)
 
+// ─── Goals & Plans ─────────────────────────────────────────────────────────
+
+export interface Goal {
+  id: string;
+  organizationId: string | null;
+  agentId: string | null;
+  title: string;
+  description: string | null;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  status: 'draft' | 'active' | 'in_progress' | 'blocked' | 'achieved' | 'abandoned';
+  successCriteria: string[] | null;
+  constraints: string[] | null;
+  deadline: string | null;
+  measurableTarget: string | null;
+  progress: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  steps?: PlanStep[];
+}
+
+export interface PlanStep {
+  id: string;
+  goalId: string;
+  assignedAgentId: string | null;
+  title: string;
+  description: string | null;
+  type: 'research' | 'reasoning' | 'generation' | 'validation' | 'approval' | 'action';
+  order: number;
+  status: 'pending' | 'ready' | 'running' | 'blocked' | 'failed' | 'verified' | 'completed' | 'skipped';
+  dependsOn: string[] | null;
+  input: any;
+  output: any;
+  artifacts: any;
+  verification: any;
+  verificationResult: any;
+  retries: number;
+  maxRetries: number;
+  runId: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const getGoals = (params?: { organizationId?: string; agentId?: string; status?: string }) =>
+  api.get<Goal[]>('/goals', { params }).then(r => r.data);
+
+export const getGoal = (id: string) =>
+  api.get<Goal & { steps: PlanStep[] }>(`/goals/${id}`).then(r => r.data);
+
+export const createGoal = (data: Partial<Goal>) =>
+  api.post<Goal>('/goals', data).then(r => r.data);
+
+export const updateGoal = (id: string, data: Partial<Goal>) =>
+  api.put<Goal>(`/goals/${id}`, data).then(r => r.data);
+
+export const deleteGoal = (id: string) =>
+  api.delete(`/goals/${id}`).then(r => r.data);
+
+export const createPlanStep = (goalId: string, data: Partial<PlanStep>) =>
+  api.post<PlanStep>(`/goals/${goalId}/steps`, data).then(r => r.data);
+
+export const updatePlanStep = (goalId: string, stepId: string, data: Partial<PlanStep>) =>
+  api.put<PlanStep>(`/goals/${goalId}/steps/${stepId}`, data).then(r => r.data);
+
+export const deletePlanStep = (goalId: string, stepId: string) =>
+  api.delete(`/goals/${goalId}/steps/${stepId}`).then(r => r.data);
+
+export const activateGoal = (id: string) =>
+  api.post(`/goals/${id}/activate`).then(r => r.data);
+
+export const advanceGoal = (id: string) =>
+  api.post(`/goals/${id}/advance`).then(r => r.data);
+
 export default api

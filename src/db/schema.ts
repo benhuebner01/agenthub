@@ -208,6 +208,50 @@ export const tacitKnowledge = sqliteTable('tacit_knowledge', {
   updatedAt: text('updated_at').notNull(),
 });
 
+// Goals table — structured objectives with success criteria
+export const goals = sqliteTable('goals', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  agentId: text('agent_id').references(() => agents.id, { onDelete: 'set null' }), // for standalone agents
+  title: text('title').notNull(),
+  description: text('description'),
+  priority: text('priority').notNull().default('medium'), // 'critical' | 'high' | 'medium' | 'low'
+  status: text('status').notNull().default('draft'), // 'draft' | 'active' | 'in_progress' | 'blocked' | 'achieved' | 'abandoned'
+  successCriteria: text('success_criteria', { mode: 'json' }).$type<string[]>(), // array of criteria strings
+  constraints: text('constraints', { mode: 'json' }).$type<string[]>(), // array of constraint strings
+  deadline: text('deadline'), // ISO date string
+  measurableTarget: text('measurable_target'),
+  progress: integer('progress').notNull().default(0), // 0-100
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+  completedAt: text('completed_at'),
+});
+
+// Plan Steps table — structured execution steps within a goal
+export const planSteps = sqliteTable('plan_steps', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  goalId: text('goal_id').notNull().references(() => goals.id, { onDelete: 'cascade' }),
+  assignedAgentId: text('assigned_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  type: text('type').notNull().default('action'), // 'research' | 'reasoning' | 'generation' | 'validation' | 'approval' | 'action'
+  order: integer('order').notNull().default(0),
+  status: text('status').notNull().default('pending'), // 'pending' | 'ready' | 'running' | 'blocked' | 'failed' | 'verified' | 'completed' | 'skipped'
+  dependsOn: text('depends_on', { mode: 'json' }).$type<string[]>(), // array of step IDs
+  input: text('input', { mode: 'json' }), // input data/context
+  output: text('output', { mode: 'json' }), // result data
+  artifacts: text('artifacts', { mode: 'json' }), // produced files, links, etc.
+  verification: text('verification', { mode: 'json' }), // verification config: { checks: string[], schema?: string }
+  verificationResult: text('verification_result', { mode: 'json' }), // { passed: boolean, details: string[] }
+  retries: integer('retries').notNull().default(0),
+  maxRetries: integer('max_retries').notNull().default(3),
+  runId: text('run_id').references(() => runs.id, { onDelete: 'set null' }), // linked execution run
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
+
 // API Keys — encrypted storage for provider keys (managed via UI)
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -307,6 +351,18 @@ export const ceoPrelaunchMessagesRelations = relations(ceoPrelaunchMessages, ({ 
   organization: one(organizations, { fields: [ceoPrelaunchMessages.organizationId], references: [organizations.id] }),
 }));
 
+export const goalsRelations = relations(goals, ({ one, many }) => ({
+  organization: one(organizations, { fields: [goals.organizationId], references: [organizations.id] }),
+  agent: one(agents, { fields: [goals.agentId], references: [agents.id] }),
+  steps: many(planSteps),
+}));
+
+export const planStepsRelations = relations(planSteps, ({ one }) => ({
+  goal: one(goals, { fields: [planSteps.goalId], references: [goals.id] }),
+  assignedAgent: one(agents, { fields: [planSteps.assignedAgentId], references: [agents.id] }),
+  run: one(runs, { fields: [planSteps.runId], references: [runs.id] }),
+}));
+
 // Type exports
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
@@ -342,3 +398,7 @@ export type TacitKnowledge = typeof tacitKnowledge.$inferSelect;
 export type NewTacitKnowledge = typeof tacitKnowledge.$inferInsert;
 export type CeoPrelaunchMessage = typeof ceoPrelaunchMessages.$inferSelect;
 export type NewCeoPrelaunchMessage = typeof ceoPrelaunchMessages.$inferInsert;
+export type Goal = typeof goals.$inferSelect;
+export type NewGoal = typeof goals.$inferInsert;
+export type PlanStep = typeof planSteps.$inferSelect;
+export type NewPlanStep = typeof planSteps.$inferInsert;
