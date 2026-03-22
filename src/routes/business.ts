@@ -1022,9 +1022,9 @@ Respond with ONLY valid JSON:
       updatedAt: now,
     }).returning();
 
-    let ceoAgent: any;
+    let ceoAgent: any = null;
 
-    if (existingCeoId) {
+    if (existingCeoId && existingCeoId !== 'later') {
       // Use an existing agent as CEO — assign to this org and promote to CEO role
       const [existing] = await db.select().from(agents).where(eq(agents.id, existingCeoId));
       if (!existing) {
@@ -1049,6 +1049,10 @@ Respond with ONLY valid JSON:
         jobDescription: ceoAgent.jobDescription || 'Lead the organization',
       };
       await db.update(organizations).set({ teamPlanJson: JSON.stringify(teamPlan) }).where(eq(organizations.id, orgId));
+    } else if (existingCeoId === 'later') {
+      // Skip CEO creation — user will assign one later or let the system decide
+      // Set launch state to 'draft' since there's no CEO yet
+      await db.update(organizations).set({ launchState: 'draft' }).where(eq(organizations.id, orgId));
     } else {
       // Create a NEW CEO agent from the AI plan
       const ceoConfig = teamPlan.ceoAgent || {};
@@ -1069,22 +1073,23 @@ Respond with ONLY valid JSON:
       ceoAgent = newCeo;
     }
 
-    // Generate CEO agent files
-    generateAgentFiles(ceoAgent.id).catch((e: any) =>
-      console.error('[Business] CEO file generation failed (non-critical):', e.message)
-    );
-
-    // Auto-generate org memory (async)
-    const allTeamNames = (teamPlan.proposedTeam || []).map((a: any) => `${a.name} (${a.role})`).join(', ');
-    generateOrgMemory(orgId, org, ceoAgent, allTeamNames).catch((e: any) =>
-      console.error('[Business] Org memory generation failed (non-critical):', e.message)
-    );
+    // Generate CEO agent files + org memory (only if CEO was created/assigned)
+    if (ceoAgent) {
+      generateAgentFiles(ceoAgent.id).catch((e: any) =>
+        console.error('[Business] CEO file generation failed (non-critical):', e.message)
+      );
+      const allTeamNames = (teamPlan.proposedTeam || []).map((a: any) => `${a.name} (${a.role})`).join(', ');
+      generateOrgMemory(orgId, org, ceoAgent, allTeamNames).catch((e: any) =>
+        console.error('[Business] Org memory generation failed (non-critical):', e.message)
+      );
+    }
 
     res.status(201).json({
       data: {
         organization: org,
-        ceoAgent,
+        ceoAgent: ceoAgent || null,
         teamPlan,
+        ceoDeferred: existingCeoId === 'later',
       },
     });
   } catch (err: any) {

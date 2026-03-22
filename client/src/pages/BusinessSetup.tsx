@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
-  Building2, Sparkles, ChevronRight, Plus, Trash2, CheckCircle,
+  Building2, Sparkles, ChevronRight, Plus, Trash2, CheckCircle, Clock,
   Loader2, ArrowLeft, MessageSquare, Rocket, Send, Bot, User as UserIcon,
 } from 'lucide-react'
 import {
@@ -123,7 +123,8 @@ export default function BusinessSetup() {
       return
     }
     setStep(2)
-    createCeoMutation.mutate({ name: companyName, description, industry, goals: validGoals, existingCeoId: selectedCeoId || undefined } as any)
+    const ceoOption = selectedCeoId === '__later' ? 'later' : (selectedCeoId || undefined)
+    createCeoMutation.mutate({ name: companyName, description, industry, goals: validGoals, existingCeoId: ceoOption } as any)
   }
 
   const handleSendChat = () => {
@@ -233,20 +234,23 @@ export default function BusinessSetup() {
             </div>
           </div>
 
-          {/* CEO Agent Selection */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">CEO Agent</label>
-            <p className="text-xs text-slate-500 mb-2">Choose an existing agent as CEO, or let AI create a new one.</p>
-            <select value={selectedCeoId} onChange={e => setSelectedCeoId(e.target.value)}
-              className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-xl text-slate-200 text-sm focus:outline-none focus:border-accent-purple/50">
-              <option value="">🤖 Create new CEO (AI-generated)</option>
-              {availableAgents.map((a: Agent) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} — {a.type} {a.role !== 'worker' ? `(${a.role})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* CEO Agent Selection — only shown when agents exist */}
+          {availableAgents.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">CEO Agent (optional)</label>
+              <p className="text-xs text-slate-500 mb-2">Pick an existing agent as CEO, let AI create one, or decide later.</p>
+              <select value={selectedCeoId} onChange={e => setSelectedCeoId(e.target.value)}
+                className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-xl text-slate-200 text-sm focus:outline-none focus:border-accent-purple/50">
+                <option value="">🤖 Let AI create a new CEO</option>
+                <option value="__later">⏳ Decide later (CEO will be assigned after launch)</option>
+                {availableAgents.map((a: Agent) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {a.type} {a.role !== 'worker' ? `(${a.role})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <button onClick={handleAnalyze} className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-accent-purple hover:bg-purple-600 text-white font-semibold rounded-xl transition-colors">
@@ -293,14 +297,24 @@ export default function BusinessSetup() {
           </div>
         </div>
 
-        {/* CEO Created Banner */}
-        <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-center gap-3">
-          <CheckCircle className="w-5 h-5 text-green-400 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-green-300">CEO Agent Created</p>
-            <p className="text-xs text-green-400/70">{teamPlan.ceoAgent.name} — {teamPlan.ceoAgent.type} · {teamPlan.ceoAgent.jobDescription}</p>
+        {/* CEO Status Banner */}
+        {selectedCeoId === '__later' ? (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex items-center gap-3">
+            <Clock className="w-5 h-5 text-yellow-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-yellow-300">CEO — to be assigned later</p>
+              <p className="text-xs text-yellow-400/70">The AI planned a CEO role. You can assign an agent after launch.</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 text-green-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-green-300">CEO Agent Created</p>
+              <p className="text-xs text-green-400/70">{teamPlan.ceoAgent.name} — {teamPlan.ceoAgent.type} · {teamPlan.ceoAgent.jobDescription}</p>
+            </div>
+          </div>
+        )}
 
         {/* AI Reasoning */}
         {teamPlan.reasoning && (
@@ -376,10 +390,12 @@ export default function BusinessSetup() {
 
         {/* Actions */}
         <div className="flex gap-3">
-          <button onClick={() => { setChatMessages([]); setStep(4) }}
-            className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-white/5 hover:bg-white/10 text-slate-200 font-medium rounded-xl border border-dark-border transition-colors">
-            <MessageSquare className="w-5 h-5" /> Chat with CEO (Optional)
-          </button>
+          {selectedCeoId !== '__later' && (
+            <button onClick={() => { setChatMessages([]); setStep(4) }}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-white/5 hover:bg-white/10 text-slate-200 font-medium rounded-xl border border-dark-border transition-colors">
+              <MessageSquare className="w-5 h-5" /> Chat with CEO (Optional)
+            </button>
+          )}
           <button onClick={handleLaunch}
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-accent-purple hover:bg-purple-600 text-white font-semibold rounded-xl transition-colors">
             <Rocket className="w-5 h-5" /> Launch Now
