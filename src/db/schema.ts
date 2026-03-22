@@ -222,6 +222,12 @@ export const goals = sqliteTable('goals', {
   deadline: text('deadline'), // ISO date string
   measurableTarget: text('measurable_target'),
   progress: integer('progress').notNull().default(0), // 0-100
+  // Replanning support
+  maxReplans: integer('max_replans').notNull().default(2), // how many times the plan can be regenerated on failure
+  replanCount: integer('replan_count').notNull().default(0), // how many replans have happened
+  replanReason: text('replan_reason'), // last replan reason
+  // Memory summary
+  summary: text('summary'), // auto-generated summary of completed work so far
   createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
   completedAt: text('completed_at'),

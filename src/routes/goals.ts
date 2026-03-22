@@ -303,4 +303,45 @@ router.post('/:id/execute-all', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/goals/:id/replan — manually trigger replanning for a blocked/failed goal
+import { tryReplan } from '../services/replanner';
+import { updateGoalSummary, persistSummaryToSharedMemory } from '../services/memorySummary';
+
+router.post('/:id/replan', async (req: Request, res: Response) => {
+  try {
+    const { failedStepId, reason } = req.body as { failedStepId?: string; reason?: string };
+    const goalId = req.params.id;
+
+    // If no specific step, find the most recent failed step
+    let stepId = failedStepId;
+    if (!stepId) {
+      const failedSteps = await db.select().from(planSteps)
+        .where(and(eq(planSteps.goalId, goalId), eq(planSteps.status, 'failed')))
+        .orderBy(desc(planSteps.updatedAt));
+      stepId = failedSteps[0]?.id;
+    }
+
+    if (!stepId) {
+      res.status(400).json({ error: 'No failed step found to replan from' });
+      return;
+    }
+
+    const result = await tryReplan(goalId, stepId, reason || 'Manual replan requested');
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/goals/:id/summarize — manually trigger summary generation
+router.post('/:id/summarize', async (req: Request, res: Response) => {
+  try {
+    const summary = await updateGoalSummary(req.params.id);
+    await persistSummaryToSharedMemory(req.params.id);
+    res.json({ summary });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

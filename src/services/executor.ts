@@ -703,10 +703,15 @@ export async function executeAgent(
     throw new Error(`Agent ${agentId} not found`);
   }
 
-  // Load persistent memory context + shared org memory
+  // Load persistent memory context + shared org memory + goal summaries
   const agentMem = await loadAgentMemoryContext(agentId);
   const sharedMem = await loadSharedMemoryContext(agentRecord.organizationId);
-  const memoryContext = agentMem + sharedMem;
+  let summaryCxt = '';
+  try {
+    const { buildMemorySummaryContext } = await import('./memorySummary');
+    summaryCxt = await buildMemorySummaryContext(agentId, agentRecord.organizationId);
+  } catch { /* summary module not critical */ }
+  const memoryContext = agentMem + sharedMem + summaryCxt;
 
   // Insert initial run record
   await db.insert(runs).values({

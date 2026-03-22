@@ -366,6 +366,12 @@ async function migrate() {
     addColumnSafe(`ALTER TABLE runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`);
     addColumnSafe(`ALTER TABLE runs ADD COLUMN duration_ms INTEGER`);
 
+    // Goal replanning + summary fields
+    addColumnSafe(`ALTER TABLE goals ADD COLUMN max_replans INTEGER NOT NULL DEFAULT 2`);
+    addColumnSafe(`ALTER TABLE goals ADD COLUMN replan_count INTEGER NOT NULL DEFAULT 0`);
+    addColumnSafe(`ALTER TABLE goals ADD COLUMN replan_reason TEXT`);
+    addColumnSafe(`ALTER TABLE goals ADD COLUMN summary TEXT`);
+
     console.log('Migrations complete (SQLite)');
   } else {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -385,6 +391,10 @@ async function migrate() {
         ALTER TABLE runs ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE runs ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
+        ALTER TABLE goals ADD COLUMN IF NOT EXISTS max_replans INTEGER NOT NULL DEFAULT 2;
+        ALTER TABLE goals ADD COLUMN IF NOT EXISTS replan_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE goals ADD COLUMN IF NOT EXISTS replan_reason TEXT;
+        ALTER TABLE goals ADD COLUMN IF NOT EXISTS summary TEXT;
       `);
 
       console.log('Migrations complete (PostgreSQL)');

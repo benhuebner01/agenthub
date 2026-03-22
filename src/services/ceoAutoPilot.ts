@@ -85,6 +85,9 @@ ${orgAgents.map((a: any) => `- ${a.name} (${a.role}, ${a.type}) — ${a.status}`
 ## Active Goals
 ${goalSummaries.length > 0 ? goalSummaries.join('\n') : 'No active goals.'}
 
+## Goal Progress Summaries
+${activeGoals.filter((g: any) => g.summary).slice(0, 5).map((g: any) => `### ${g.title}\n${g.summary}`).join('\n\n') || 'No summaries yet.'}
+
 ## Activity (last 24h)
 - ${runsSince.length} successful runs
 - Total cost: $${runsSince.reduce((sum: number, r: any) => sum + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0).toFixed(4)}

@@ -1,0 +1,865 @@
+Ja — genau da würde ich ansetzen: **nicht das Modell neu erfinden, sondern den fehlenden Layer zwischen LLM, Tools, Memory und Ausführung bauen**.
+
+Für deinen Fall, wenn du schon an einem **Agent Orchestrator** bastelst, sind **Punkt 2 (Tool Governance)** und **Punkt 3 (Goal/Plan Layer)** wahrscheinlich die zwei wertvollsten Bausteine überhaupt.
+
+Im Kern baust du dann nicht “noch einen Agenten”, sondern eher ein:
+
+**Agent Runtime / Control Plane**
+mit:
+
+* Zielen
+* Regeln
+* Tool-Rechten
+* Plan-Schritten
+* Zustandsmaschine
+* Verifikation
+* Handoffs
+* Recovery
+
+Der Trick ist:
+Das LLM darf **nicht direkt der Boss** sein.
+Es sollte eher ein **Reasoning-Worker innerhalb eines kontrollierten Systems** sein.
+
+---
+
+# 1. Der fehlende Layer als Architektur
+
+Ich würde das in 5 Schichten aufteilen:
+
+## A. Intent / Goal Layer
+
+Hier definierst du:
+
+* Was soll erreicht werden?
+* Was sind Constraints?
+* Was ist verboten?
+* Wann gilt etwas als “fertig”?
+
+Beispiel:
+
+```yaml
+goal:
+  id: launch_campaign
+  objective: "Erstelle eine Promo-Kampagne für Produkt X"
+  success:
+    - angle_defined
+    - email_draft_created
+    - whatsapp_post_created
+    - claims_checked
+  constraints:
+    - no_false_claims
+    - ask_before_send
+    - use_web_for_recent_info
+```
+
+Das ist wichtig, weil das LLM sonst oft nur auf den letzten User-Text reagiert, statt gegen ein stabiles Zielsystem zu arbeiten.
+
+---
+
+## B. Plan Layer
+
+Hier wird aus dem Ziel ein **konkreter Ablauf**.
+
+Nicht:
+“mach mal”
+
+Sondern:
+
+* Schritt 1: recherchieren
+* Schritt 2: Angle bilden
+* Schritt 3: Draft erstellen
+* Schritt 4: prüfen
+* Schritt 5: freigeben
+
+Beispiel:
+
+```yaml
+plan:
+  - id: research_offer
+    type: research
+    output: offer_summary
+
+  - id: create_angle
+    type: reasoning
+    depends_on: [research_offer]
+    output: promo_angle
+
+  - id: write_email
+    type: generation
+    depends_on: [create_angle]
+    output: email_draft
+
+  - id: compliance_review
+    type: validation
+    depends_on: [write_email]
+    output: review_result
+```
+
+Das Entscheidende:
+Der Plan darf **nicht nur Text sein**, sondern muss **maschinenlesbar** sein.
+
+---
+
+## C. Tool Governance Layer
+
+Das ist der Teil, den fast alle schlecht machen.
+
+Hier legst du fest:
+
+* welche Tools es gibt
+* welche Agenten sie nutzen dürfen
+* unter welchen Bedingungen
+* mit welchen Input-Schemas
+* was geprüft werden muss
+* ob dry-run oder commit erlaubt ist
+
+Beispiel:
+
+```yaml
+tools:
+  web_search:
+    allowed_for: [researcher, reviewer]
+    required_when:
+      - current_info_needed
+    forbidden_when:
+      - purely_internal_task
+
+  gmail:
+    allowed_for: [writer]
+    mode: draft_only
+    requires_approval: true
+
+  filesystem:
+    allowed_for: [builder]
+    write_paths:
+      - /workspace/output/*
+    deny:
+      - /system/*
+      - /secrets/*
+```
+
+Das ist Gold wert, weil du damit wegkommst von:
+“Das Modell entscheidet spontan”
+
+hin zu:
+“Das Modell arbeitet innerhalb expliziter Policies”.
+
+---
+
+## D. Execution / State Layer
+
+Hier läuft dein Orchestrator als Zustandsmaschine:
+
+Status pro Task:
+
+* pending
+* ready
+* running
+* blocked
+* failed
+* verified
+* completed
+
+Und pro Step:
+
+* input
+* output
+* artifacts
+* tool calls
+* retries
+* logs
+* verification result
+
+Ohne diesen Layer bekommst du schnell Chaos, weil der Agent “gefühlt” arbeitet, aber nicht sauber nachvollziehbar.
+
+---
+
+## E. Verification Layer
+
+Das ist die Sicherheitsbremse.
+
+Jeder relevante Schritt braucht:
+
+* Schema-Check
+* Regel-Check
+* optional Second Pass
+* optional Human Approval
+
+Beispiel:
+
+```yaml
+verification:
+  email_draft:
+    schema: email_v1
+    checks:
+      - no_unverified_claims
+      - no_missing_cta
+      - no_send_action
+```
+
+---
+
+# 2. Punkt 2: Tool Governance richtig umsetzen
+
+Das würde ich in deinem Orchestrator **nicht promptbasiert**, sondern **policy-basiert** lösen.
+
+## Was heute oft schief läuft
+
+Viele Systeme machen nur:
+
+* Toolbeschreibung
+* JSON schema
+* LLM darf raten
+
+Problem:
+Das Modell weiß dann zwar, **wie** es ein Tool aufruft,
+aber nicht sauber:
+
+* ob es das überhaupt darf
+* ob es das jetzt benutzen muss
+* ob die Antwort ohne Tool ungültig wäre
+* ob das Ergebnis ausreichend ist
+
+## Besserer Ansatz: Policy Engine vor dem Tool
+
+Jeder Tool-Call geht nicht direkt raus, sondern durch 3 Checks:
+
+### 1. Permission Check
+
+Darf dieser Agent dieses Tool überhaupt nutzen?
+
+### 2. Context Check
+
+Ist der Call in dieser Situation erlaubt oder erforderlich?
+
+### 3. Safety / Validation Check
+
+Ist der Input vollständig, plausibel und innerhalb erlaubter Parameter?
+
+---
+
+## Beispiel-Fluss
+
+Agent sagt:
+
+> Ich will `web_search("current price of X")`
+
+Runtime prüft:
+
+* Ist `web_search` für diesen Agenten erlaubt?
+* Ist “aktuelle Preise” ein Trigger für Pflicht-Browsing?
+* Ist die Query valide?
+* Muss danach eine Quellenprüfung erfolgen?
+
+Dann erst wird ausgeführt.
+
+---
+
+## Praktisches Modell für Tools
+
+Ich würde Tools so definieren:
+
+```json
+{
+  "name": "web_search",
+  "class": "research",
+  "permissions": {
+    "allowed_agents": ["researcher", "reviewer"],
+    "approval_required": false
+  },
+  "rules": {
+    "required_if": ["current_info", "news", "pricing"],
+    "forbidden_if": ["offline_only_task"]
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": { "type": "string" }
+    },
+    "required": ["query"]
+  },
+  "postconditions": [
+    "must_return_sources"
+  ]
+}
+```
+
+Sehr wichtig:
+Tool-Definitionen sollten **semantische Regeln** enthalten, nicht nur JSON-Felder.
+
+---
+
+## Was du zusätzlich einbauen solltest
+
+### Tool Mode
+
+Nicht nur “Tool ist erlaubt”, sondern z. B.:
+
+* read_only
+* draft_only
+* execute
+* execute_with_approval
+* sandbox_only
+
+Beispiel:
+Gmail darf Drafts erstellen, aber nicht senden.
+
+### Tool Budget
+
+Gerade bei Agenten extrem wichtig:
+
+* max Calls pro Task
+* max Cost
+* max Retries
+
+### Tool Confidence Threshold
+
+Wenn das Modell bei der Entscheidung unsicher ist:
+
+* lieber Rückfrage
+* oder Review-Agent
+* oder Fallback-Plan
+
+### Tool Provenance
+
+Jeder Tool-Output bekommt:
+
+* timestamp
+* source
+* raw result
+* normalized result
+* used in which step
+
+So kannst du später auditieren.
+
+---
+
+# 3. Punkt 3: Goal- und Plan-Layer richtig umsetzen
+
+Hier würde ich sehr klar unterscheiden zwischen:
+
+## a) Goal
+
+Das gewünschte Ergebnis
+
+## b) Plan
+
+Die aktuellen Schritte
+
+## c) Task Instance
+
+Die konkrete Ausführung eines Schritts
+
+## d) Policy
+
+Was erlaubt/verboten ist
+
+## e) State
+
+Wo das System gerade steht
+
+Wenn du das trennst, wird der Orchestrator viel robuster.
+
+---
+
+## Ein gutes Goal-Modell
+
+Ein Goal sollte mindestens enthalten:
+
+* `objective`
+* `success_criteria`
+* `constraints`
+* `priority`
+* `deadline` optional
+* `approval_points`
+* `fallback_behavior`
+
+Beispiel:
+
+```yaml
+goal:
+  objective: "Bereite einen Outreach-Draft für 20 potenzielle Affiliates vor"
+  success_criteria:
+    - list_of_20_contacts
+    - 20_personalized_drafts
+    - no_unverified_claims
+  constraints:
+    - no_sending
+    - use_only_verified_contact_sources
+    - keep_tone_professional
+  approval_points:
+    - before_export
+```
+
+Das Schöne:
+Das Modell muss nicht ständig raten, was “gut genug” ist.
+
+---
+
+## Plan als lebende Struktur
+
+Der Plan sollte **veränderbar**, aber kontrolliert sein.
+
+Also:
+
+* initialer Plan wird erzeugt
+* Runtime validiert
+* Ausführung startet
+* bei Fehlschlag darf replanned werden
+* aber nur innerhalb bestimmter Regeln
+
+Beispiel:
+
+```yaml
+replanning:
+  allowed: true
+  max_replans: 2
+  must_preserve_constraints: true
+  requires_reason: true
+```
+
+So verhinderst du wildes “jetzt mache ich was ganz anderes”.
+
+---
+
+## Plan-Typen
+
+Ich würde Steps typisieren:
+
+* `research`
+* `reasoning`
+* `generation`
+* `transformation`
+* `validation`
+* `delegation`
+* `approval`
+* `execution`
+
+Das hilft extrem bei Routing und Policies.
+
+---
+
+# 4. So würde ich das konkret in einem Agent Orchestrator bauen
+
+## Kernobjekte
+
+### Agent
+
+* Rolle
+* Fähigkeiten
+* erlaubte Tools
+* System-Regeln
+* Kosten-/Zeit-Budget
+
+### Goal
+
+* Zielbeschreibung
+* Erfolgskriterien
+* Constraints
+
+### Plan
+
+* Steps
+* Dependencies
+* Outputs
+* Status
+
+### Task Run
+
+* konkrete Ausführung eines Steps
+* Logs
+* Tool Calls
+* Resultat
+* Verifikation
+
+### Memory
+
+* session
+* working
+* long_term
+* summarized context
+
+### Policy
+
+* Tool-Regeln
+* Rollenrechte
+* Human approval
+* escalation rules
+
+---
+
+# 5. Die wichtigste Designentscheidung
+
+Ich würde **LLM nicht den Gesamtplan blind kontrollieren lassen**.
+
+Stattdessen:
+
+## Besser:
+
+LLM ist zuständig für:
+
+* Interpretation
+* Vorschläge
+* Texte
+* Umplanungsvorschläge
+* Priorisierung
+
+Die Runtime ist zuständig für:
+
+* State
+* Step-Auswahl
+* Tool-Freigabe
+* Validation
+* Retries
+* Logging
+* Handoffs
+* Approval Gates
+
+Das ist der Kern von diesem “fehlenden Layer”.
+
+Also:
+
+**LLM = kognitiver Motor**
+**Runtime = Betriebssystem**
+
+---
+
+# 6. Minimal brauchbarer MVP für dich
+
+Wenn du das schnell brauchbar bauen willst, würde ich nicht direkt alles machen.
+
+## MVP Phase 1
+
+Baue diese 6 Dinge:
+
+### 1. Goal Schema
+
+Ein stabiles JSON/YAML Format für Ziele
+
+### 2. Plan Schema
+
+Maschinenlesbare Steps mit Dependencies
+
+### 3. Tool Registry
+
+Jedes Tool mit:
+
+* input schema
+* role permissions
+* mode
+* postconditions
+
+### 4. State Machine
+
+Step Status:
+
+* pending
+* ready
+* running
+* failed
+* verified
+* done
+
+### 5. Verification Hooks
+
+Mindestens:
+
+* schema check
+* required fields
+* banned patterns
+* tool output presence
+
+### 6. Execution Log
+
+Jeder Schritt speichert:
+
+* input
+* prompt version
+* model
+* tool calls
+* output
+* verification
+* final state
+
+Damit hast du schon etwas, das viel stabiler ist als 90 % der Agent-Setups.
+
+---
+
+# 7. Sehr sinnvolle Phase 2
+
+Danach würde ich ergänzen:
+
+## Replanning
+
+Wenn ein Step fehlschlägt, darf das System einen neuen Plan vorschlagen.
+
+## Delegation
+
+Bestimmte Step-Typen gehen an Spezialagenten.
+
+## Approval Gates
+
+Vor riskanten Aktionen muss ein Mensch freigeben.
+
+## Memory Summaries
+
+Nicht alles in den Kontext kippen, sondern Task-Summaries erzeugen.
+
+## Tool Policies mit Bedingungen
+
+Zum Beispiel:
+“Websuche ist Pflicht bei aktuellen Infos”.
+
+---
+
+# 8. Multi-Agent-Orchestrierung ohne Chaos
+
+Wenn du mehrere Agenten willst, würde ich sie **nicht frei miteinander chatten lassen**.
+
+Besser:
+
+## Jeder Agent bekommt:
+
+* Rolle
+* festen Input
+* klare Output-Struktur
+* definierte Tools
+* definierte Grenzen
+
+Beispiel:
+
+### Researcher
+
+* darf browsen
+* liefert strukturierte Findings
+* kein finaler Text
+
+### Strategist
+
+* darf keine Tools nutzen
+* macht aus Findings einen Angle
+
+### Writer
+
+* schreibt den Draft
+* darf Templates laden
+* darf nicht senden
+
+### Reviewer
+
+* prüft Claims, Format, Vollständigkeit
+
+Dann nur kontrollierte Handoffs:
+
+```yaml
+handoff:
+  from: researcher
+  to: strategist
+  payload:
+    - findings_summary
+    - sources
+```
+
+Keine freien, endlosen Agentengespräche.
+Die sind spannend, aber oft ineffizient und schwer debugbar.
+
+---
+
+# 9. Eine starke technische Faustregel
+
+Wenn du unsicher bist, bau den Orchestrator so, dass alles auf diese Formel hinausläuft:
+
+## Decide → Check → Execute → Verify → Commit
+
+Nicht:
+**Think → Act**
+
+sondern:
+
+1. Agent schlägt nächsten Schritt vor
+2. Runtime prüft Policy und State
+3. Tool/Step wird ausgeführt
+4. Ergebnis wird verifiziert
+5. Zustand wird committed
+
+Das ist wahrscheinlich der wichtigste Unterschied zwischen Spielzeug-Agent und produktionsreifem System.
+
+---
+
+# 10. Beispiel für einen Flow
+
+Nehmen wir dein System soll eine Kampagne bauen.
+
+## Input
+
+“Erstelle Promo-Assets für Produkt X”
+
+## Runtime
+
+Erzeugt Goal
+
+## Planner-Agent
+
+Erstellt Plan:
+
+* research
+* angle
+* draft
+* review
+
+## Runtime
+
+Prüft Plan gegen Regeln
+
+## Research Step
+
+Researcher darf Web nutzen
+
+## Runtime
+
+Speichert Quellen und Summary
+
+## Angle Step
+
+Strategist bekommt nur verdichteten Input, nicht den ganzen Verlauf
+
+## Writer Step
+
+Writer erstellt E-Mail + WhatsApp-Text
+
+## Review Step
+
+Reviewer prüft Claims + CTA + Format
+
+## Approval Gate
+
+Mensch gibt frei
+
+## Optional Export
+
+Draft speichern, aber nicht senden
+
+So muss ein Orchestrator denken.
+
+---
+
+# 11. Der größte Fehler, den ich vermeiden würde
+
+Nicht versuchen, alles direkt mit einem Mega-Prompt zu lösen.
+
+Also nicht:
+
+* Rolle
+* Ziel
+* Tools
+* Policies
+* Memory
+* State
+* Plan
+* Replanning
+* Review
+
+alles in einen einzigen Monster-Context werfen.
+
+Das skaliert schlecht.
+
+Stattdessen:
+
+* Regeln außerhalb des LLM
+* Plan strukturiert
+* Kontext selektiv
+* Tool-Governance in Runtime
+* Verifikation separat
+
+---
+
+# 12. Wenn du daraus später wirklich eine “Sprache” machen willst
+
+Dann würde ich zuerst **Runtime + Schemas** bauen und die Sprache erst danach.
+
+Warum?
+Weil die Syntax wertlos ist, wenn die Runtime noch nicht klar ist.
+
+Erst definieren:
+
+* welche Objekte existieren
+* welche Zustände existieren
+* welche Policies existieren
+* welche Transitions erlaubt sind
+
+Danach kannst du eine DSL drüberlegen.
+
+Zum Beispiel:
+
+```txt
+agent Researcher can web_search, read_docs
+agent Writer can draft_email only
+agent Reviewer can validate_claims
+
+goal CreateCampaign:
+  success email_draft, whatsapp_post, reviewed
+  constraint no_false_claims
+  constraint no_send_without_approval
+
+plan:
+  research -> angle -> draft -> review -> approval
+```
+
+Das wäre dann nur die schöne Oberfläche über einer soliden Runtime.
+
+---
+
+# 13. Meine Empfehlung für deinen nächsten konkreten Schritt
+
+Wenn du gerade aktiv baust, würde ich sofort diese drei Dateien bzw. Modelle definieren:
+
+## 1. `goal.schema.json`
+
+Was ist ein Goal?
+
+## 2. `plan.schema.json`
+
+Wie sieht ein Step aus?
+Mit:
+
+* id
+* type
+* depends_on
+* input
+* output
+* retries
+* verification
+
+## 3. `tool_policy.json`
+
+Für jedes Tool:
+
+* allowed_agents
+* mode
+* required_if
+* forbidden_if
+* approval_required
+* budget
+
+Wenn diese drei sauber sind, wird der Rest viel leichter.
+
+---
+
+# 14. Meine Kurzform für dein Projekt
+
+Du baust am besten nicht:
+**einen Chatbot mit Tools**
+
+sondern:
+**eine agentische Runtime mit kontrolliertem Denken**
+
+Und der fehlende Layer ist genau das:
+
+* **Goals statt loser Prompts**
+* **Pläne statt Freestyle**
+* **Policies statt Tool-Glücksspiel**
+* **State statt Kontext-Chaos**
+* **Verification statt Hoffnung**
+
+Wenn du willst, mache ich dir im nächsten Schritt direkt ein **konkretes Architektur-Blueprint** für deinen Agent Orchestrator — mit:
+**Komponenten, Datenmodellen, Step-Typen, Tool-Policy-Format und einem Beispiel-Workflow für Multi-Agenten**.

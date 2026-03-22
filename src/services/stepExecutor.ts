@@ -12,6 +12,8 @@ import { executeAgent } from './executor';
 import { verifyStepOutput, requestHumanApproval } from './verification';
 import { checkToolPermission } from './toolGovernance';
 import { getSetting } from '../routes/settings';
+import { tryReplan } from './replanner';
+import { updateGoalSummary, persistSummaryToSharedMemory } from './memorySummary';
 
 async function isApprovalGateOff(): Promise<boolean> {
   const val = await getSetting('autonomy_approval_gates');
@@ -166,6 +168,8 @@ export async function executeStep(
       output: { error: err.message },
       updatedAt: new Date().toISOString(),
     }).where(eq(planSteps.id, stepId));
+    // Attempt replanning
+    await tryReplan(step.goalId, stepId, err.message).catch(() => {});
     return { stepId, status: 'failed', error: err.message };
   }
 
@@ -198,6 +202,8 @@ export async function executeStep(
       return { stepId, status: 'retry', runId: result.runId, error: result.error, attempt: retries };
     }
     await db.update(planSteps).set({ status: 'failed', updatedAt: new Date().toISOString() }).where(eq(planSteps.id, stepId));
+    // Attempt replanning
+    await tryReplan(step.goalId, stepId, result.error || 'Agent returned failure').catch(() => {});
     return { stepId, status: 'failed', runId: result.runId, output: result.output, error: result.error };
   }
 
@@ -213,6 +219,10 @@ export async function executeStep(
     // 11. Advance the goal — unlock next steps
     await advanceGoal(step.goalId);
 
+    // 12. Update goal memory summary
+    await updateGoalSummary(step.goalId).catch(() => {});
+    await persistSummaryToSharedMemory(step.goalId).catch(() => {});
+
     return { stepId, status: finalStatus as StepExecutionResult['status'], runId: result.runId, output: result.output, verificationPassed: true };
   } else {
     // Verification failed
@@ -222,6 +232,8 @@ export async function executeStep(
       return { stepId, status: 'retry', runId: result.runId, output: result.output, verificationPassed: false, attempt: retries };
     }
     await db.update(planSteps).set({ status: 'failed', updatedAt: new Date().toISOString() }).where(eq(planSteps.id, stepId));
+    // Attempt replanning
+    await tryReplan(step.goalId, stepId, 'Verification failed after max retries').catch(() => {});
     return { stepId, status: 'failed', runId: result.runId, output: result.output, verificationPassed: false };
   }
 }
