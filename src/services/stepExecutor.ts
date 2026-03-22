@@ -11,6 +11,12 @@ import { eq, and, asc } from 'drizzle-orm';
 import { executeAgent } from './executor';
 import { verifyStepOutput, requestHumanApproval } from './verification';
 import { checkToolPermission } from './toolGovernance';
+import { getSetting } from '../routes/settings';
+
+async function isApprovalGateOff(): Promise<boolean> {
+  const val = await getSetting('autonomy_approval_gates');
+  return val === 'off';
+}
 
 export interface StepExecutionResult {
   stepId: string;
@@ -97,7 +103,7 @@ export async function executeStep(
     return { stepId, status: 'blocked', error: `Policy denied: ${policyCheck.reason}` };
   }
 
-  if (policyCheck.approvalRequired) {
+  if (policyCheck.approvalRequired && !(await isApprovalGateOff())) {
     const approval = await requestHumanApproval(stepId, {
       action: `Execute step "${step.title}" using agent "${agent.name}"`,
       agentType: agent.type,

@@ -352,4 +352,50 @@ router.patch('/api-keys/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Autonomy Settings ────────────────────────────────────────────────────────
+
+// GET /api/settings/autonomy — get all autonomy-related settings
+router.get('/autonomy', async (_req: Request, res: Response) => {
+  try {
+    const approvalGates = await getSetting('autonomy_approval_gates') || 'on';
+    const ceoAutoPilot = await getSetting('autonomy_ceo_autopilot') || 'off';
+    const ceoInterval = await getSetting('autonomy_ceo_interval_minutes') || '60';
+    const autoExecuteGoals = await getSetting('autonomy_auto_execute_goals') || 'off';
+    const maxAutoRunsPerHour = await getSetting('autonomy_max_auto_runs_per_hour') || '20';
+
+    res.json({
+      data: {
+        approvalGates,          // 'on' = require approval where policies say so, 'off' = skip all approvals
+        ceoAutoPilot,           // 'on' = CEO runs periodically, 'off' = manual only
+        ceoIntervalMinutes: parseInt(ceoInterval),
+        autoExecuteGoals,       // 'on' = auto-run ready steps when goals are activated
+        maxAutoRunsPerHour: parseInt(maxAutoRunsPerHour),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/settings/autonomy — update autonomy settings
+router.put('/autonomy', async (req: Request, res: Response) => {
+  try {
+    const { approvalGates, ceoAutoPilot, ceoIntervalMinutes, autoExecuteGoals, maxAutoRunsPerHour } = req.body;
+
+    if (approvalGates !== undefined) await setSetting('autonomy_approval_gates', approvalGates);
+    if (ceoAutoPilot !== undefined) await setSetting('autonomy_ceo_autopilot', ceoAutoPilot);
+    if (ceoIntervalMinutes !== undefined) await setSetting('autonomy_ceo_interval_minutes', String(ceoIntervalMinutes));
+    if (autoExecuteGoals !== undefined) await setSetting('autonomy_auto_execute_goals', autoExecuteGoals);
+    if (maxAutoRunsPerHour !== undefined) await setSetting('autonomy_max_auto_runs_per_hour', String(maxAutoRunsPerHour));
+
+    // Notify CEO autopilot of config change
+    const { restartCeoAutoPilot } = await import('../services/ceoAutoPilot');
+    await restartCeoAutoPilot();
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

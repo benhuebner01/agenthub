@@ -10,6 +10,7 @@ import { workflows, workflowRuns, agents } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { executeAgent } from './executor';
 import { requestHumanApproval, getPendingApprovals } from './verification';
+import { getSetting } from '../routes/settings';
 import type { WorkflowStepDef } from '../db/schema';
 
 export interface WorkflowStepResult {
@@ -56,8 +57,9 @@ export async function executeWorkflowStep(runId: string): Promise<WorkflowStepRe
     return { stepId: run.currentStepId || '', status: 'failed', error: 'Current step not found in workflow definition' };
   }
 
-  // Check approval gate
-  if (currentStep.approvalRequired) {
+  // Check approval gate (skipped if user turned off approval gates)
+  const approvalGatesOff = (await getSetting('autonomy_approval_gates')) === 'off';
+  if (currentStep.approvalRequired && !approvalGatesOff) {
     // Check if there's already a resolved approval for this step
     const pending = await getPendingApprovals();
     const existingApproval = pending.find((v: any) =>

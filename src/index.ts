@@ -25,6 +25,7 @@ import verificationsRouter from './routes/verifications';
 import { startScheduler, getSchedulerMode } from './services/scheduler';
 import { startTelegramBot } from './services/telegram';
 import { resetExpiredBudgets } from './services/budget';
+import { startCeoAutoPilot, getCeoAutoPilotStatus, triggerCeoCycle } from './services/ceoAutoPilot';
 
 // DB
 import { mode as dbMode } from './db/index';
@@ -212,14 +213,26 @@ app.use('/api/workflows', workflowsRouter);
 
 // Health check endpoint (no auth, no sensitive data)
 app.get('/api/health', (req: Request, res: Response) => {
+  const ceoStatus = getCeoAutoPilotStatus();
   res.json({
     status: 'ok',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    ceoAutoPilot: ceoStatus,
     // Don't expose env details in production
     ...(IS_PRODUCTION ? {} : { env: process.env.NODE_ENV, dbMode, schedulerMode: getSchedulerMode() }),
   });
+});
+
+// POST /api/ceo/trigger — manually trigger a CEO cycle
+app.post('/api/ceo/trigger', async (req: Request, res: Response) => {
+  try {
+    await triggerCeoCycle();
+    res.json({ success: true, message: 'CEO cycle triggered' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Serve static files (web dashboard)
@@ -968,6 +981,14 @@ async function main() {
     }
   } else {
     console.log('\n[Telegram] No token configured, bot disabled');
+  }
+
+  // Start CEO Auto-Pilot (if enabled in settings)
+  console.log('\n[CEO AutoPilot] Checking...');
+  try {
+    await startCeoAutoPilot();
+  } catch (err) {
+    console.error('[CEO AutoPilot] Failed to start:', (err as Error).message);
   }
 
   // Schedule budget reset check every hour

@@ -508,6 +508,25 @@ export const getAssistantSettings = () =>
 export const setAssistantSettings = (provider: string, model: string) =>
   api.post<{ success: boolean }>('/internal-agent/settings', { provider, model }).then((r) => r.data)
 
+// ─── Autonomy Settings ──────────────────────────────────────────────────────
+
+export interface AutonomySettings {
+  approvalGates: 'on' | 'off';
+  ceoAutoPilot: 'on' | 'off';
+  ceoIntervalMinutes: number;
+  autoExecuteGoals: 'on' | 'off';
+  maxAutoRunsPerHour: number;
+}
+
+export const getAutonomySettings = () =>
+  api.get<{ data: AutonomySettings }>('/settings/autonomy').then(r => r.data.data);
+
+export const updateAutonomySettings = (data: Partial<AutonomySettings>) =>
+  api.put<{ success: boolean }>('/settings/autonomy', data).then(r => r.data);
+
+export const triggerCeoCycle = () =>
+  api.post<{ success: boolean; message: string }>('/ceo/trigger').then(r => r.data);
+
 // ─── Telegram Token Management ───────────────────────────────────────────────
 
 export const getTelegramStatus = () =>

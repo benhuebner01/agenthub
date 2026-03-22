@@ -15,6 +15,11 @@ import {
   ToggleLeft,
   ToggleRight,
   FlaskConical,
+  Zap,
+  Brain,
+  Clock,
+  ShieldOff,
+  Play,
 } from 'lucide-react'
 import {
   getAgents,
@@ -31,9 +36,13 @@ import {
   setAssistantSettings,
   getTelegramStatus,
   setTelegramToken,
+  getAutonomySettings,
+  updateAutonomySettings,
+  triggerCeoCycle,
   Agent,
   TelegramRoutes,
   ApiKeyEntry,
+  AutonomySettings,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
 
@@ -630,6 +639,151 @@ const TEXT_SIZES = [
   { value: 'xl', label: 'Extra Large', scale: '1.2' },
 ]
 
+function AutonomySection() {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['autonomy-settings'],
+    queryFn: getAutonomySettings,
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (data: Partial<AutonomySettings>) => updateAutonomySettings(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['autonomy-settings'] })
+      toast('Autonomy settings updated')
+    },
+    onError: (err: any) => toast(`Error: ${err.message}`, 'error'),
+  })
+
+  const triggerMutation = useMutation({
+    mutationFn: triggerCeoCycle,
+    onSuccess: () => toast('CEO cycle triggered'),
+    onError: (err: any) => toast(`Error: ${err.message}`, 'error'),
+  })
+
+  if (isLoading || !settings) return <div className="text-sm text-slate-500">Loading...</div>
+
+  const toggles: { key: keyof AutonomySettings; label: string; description: string; icon: any; danger?: boolean }[] = [
+    {
+      key: 'approvalGates',
+      label: 'Approval Gates',
+      description: settings.approvalGates === 'on'
+        ? 'ON — Agents must wait for human approval where policies require it'
+        : 'OFF — Full autonomy: all approval requirements are bypassed',
+      icon: settings.approvalGates === 'on' ? Shield : ShieldOff,
+      danger: settings.approvalGates === 'off',
+    },
+    {
+      key: 'ceoAutoPilot',
+      label: 'CEO Auto-Pilot',
+      description: settings.ceoAutoPilot === 'on'
+        ? `ON — CEO runs every ${settings.ceoIntervalMinutes} min, reviews goals & proposes actions`
+        : 'OFF — CEO only runs when manually triggered',
+      icon: Brain,
+    },
+    {
+      key: 'autoExecuteGoals',
+      label: 'Auto-Execute Goal Steps',
+      description: settings.autoExecuteGoals === 'on'
+        ? 'ON — Ready steps are automatically executed during CEO cycles'
+        : 'OFF — Steps must be manually triggered via Dashboard or API',
+      icon: Zap,
+    },
+  ]
+
+  return (
+    <div className="space-y-4">
+      {toggles.map(({ key, label, description, icon: Icon, danger }) => (
+        <div key={key} className={`flex items-center justify-between p-4 rounded-xl border ${danger ? 'bg-red-500/5 border-red-500/20' : 'bg-dark-bg border-dark-border'}`}>
+          <div className="flex items-center gap-3 flex-1">
+            <div className={`p-2 rounded-lg ${danger ? 'bg-red-500/20 text-red-400' : 'bg-accent-purple/20 text-accent-purple'}`}>
+              <Icon className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-200">{label}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{description}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => updateMutation.mutate({ [key]: settings[key] === 'on' ? 'off' : 'on' } as any)}
+            className="shrink-0 ml-4"
+          >
+            {settings[key] === 'on' ? (
+              <ToggleRight className="w-8 h-8 text-accent-purple" />
+            ) : (
+              <ToggleLeft className="w-8 h-8 text-slate-600" />
+            )}
+          </button>
+        </div>
+      ))}
+
+      {/* CEO Interval */}
+      {settings.ceoAutoPilot === 'on' && (
+        <div className="flex items-center gap-4 p-4 bg-dark-bg border border-dark-border rounded-xl">
+          <div className="p-2 rounded-lg bg-accent-purple/20 text-accent-purple">
+            <Clock className="w-4 h-4" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-slate-200">CEO Interval</p>
+            <p className="text-xs text-slate-500">How often the CEO reviews and acts</p>
+          </div>
+          <select
+            value={settings.ceoIntervalMinutes}
+            onChange={e => updateMutation.mutate({ ceoIntervalMinutes: parseInt(e.target.value) } as any)}
+            className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-200"
+          >
+            <option value="5">5 min</option>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="60">1 hour</option>
+            <option value="120">2 hours</option>
+            <option value="360">6 hours</option>
+            <option value="1440">24 hours</option>
+          </select>
+        </div>
+      )}
+
+      {/* Rate limit */}
+      <div className="flex items-center gap-4 p-4 bg-dark-bg border border-dark-border rounded-xl">
+        <div className="p-2 rounded-lg bg-accent-purple/20 text-accent-purple">
+          <Zap className="w-4 h-4" />
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-medium text-slate-200">Max Auto-Runs / Hour</p>
+          <p className="text-xs text-slate-500">Safety limit for automated execution</p>
+        </div>
+        <select
+          value={settings.maxAutoRunsPerHour}
+          onChange={e => updateMutation.mutate({ maxAutoRunsPerHour: parseInt(e.target.value) } as any)}
+          className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-200"
+        >
+          <option value="5">5</option>
+          <option value="10">10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+
+      {/* Manual trigger */}
+      <button
+        onClick={() => triggerMutation.mutate()}
+        disabled={triggerMutation.isPending}
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent-purple/10 hover:bg-accent-purple/20 text-accent-purple border border-accent-purple/30 rounded-xl text-sm font-medium transition-colors"
+      >
+        {triggerMutation.isPending ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <Play className="w-4 h-4" />
+        )}
+        Trigger CEO Cycle Now
+      </button>
+    </div>
+  )
+}
+
 function AppearanceSection() {
   const [textSize, setTextSize] = useState(() => localStorage.getItem('agenthub-text-size') || 'md')
 
@@ -710,6 +864,10 @@ export default function SettingsPage() {
         description="Route Telegram messages to agents"
       >
         <TelegramSection agents={agents} />
+      </Section>
+
+      <Section title="Autonomy & CEO Auto-Pilot" description="Control how much freedom your AI agents have">
+        <AutonomySection />
       </Section>
 
       <Section title="Appearance" description="Customize the control panel look and feel">
