@@ -6,8 +6,8 @@ import {
   Loader2, ArrowLeft, MessageSquare, Rocket, Send, Bot, User as UserIcon,
 } from 'lucide-react'
 import {
-  createCeo, ceoPrelaunchChat, launchBusiness, getPrelaunchMessages,
-  BusinessAnalysisInput, AgentType, AgentRole, TeamPlan, PrelaunchMessage,
+  createCeo, ceoPrelaunchChat, launchBusiness, getPrelaunchMessages, getAgents,
+  BusinessAnalysisInput, AgentType, AgentRole, TeamPlan, PrelaunchMessage, Agent,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
 
@@ -47,6 +47,16 @@ export default function BusinessSetup() {
   const [orgId, setOrgId] = useState<string | null>(null)
   const [teamPlan, setTeamPlan] = useState<TeamPlan | null>(null)
   const [editableTeam, setEditableTeam] = useState<TeamPlan['proposedTeam']>([])
+
+  // CEO selection
+  const [selectedCeoId, setSelectedCeoId] = useState<string>('')
+
+  // Load existing agents for CEO dropdown
+  const { data: existingAgents } = useQuery({
+    queryKey: ['agents-for-ceo'],
+    queryFn: () => getAgents(),
+  })
+  const availableAgents = (existingAgents?.data || []).filter((a: Agent) => !a.organizationId || a.role === 'ceo')
 
   // Chat state
   const [chatInput, setChatInput] = useState('')
@@ -113,7 +123,7 @@ export default function BusinessSetup() {
       return
     }
     setStep(2)
-    createCeoMutation.mutate({ name: companyName, description, industry, goals: validGoals })
+    createCeoMutation.mutate({ name: companyName, description, industry, goals: validGoals, existingCeoId: selectedCeoId || undefined } as any)
   }
 
   const handleSendChat = () => {
@@ -221,6 +231,21 @@ export default function BusinessSetup() {
                 <Plus className="w-4 h-4" /> Add goal
               </button>
             </div>
+          </div>
+
+          {/* CEO Agent Selection */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">CEO Agent</label>
+            <p className="text-xs text-slate-500 mb-2">Choose an existing agent as CEO, or let AI create a new one.</p>
+            <select value={selectedCeoId} onChange={e => setSelectedCeoId(e.target.value)}
+              className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-xl text-slate-200 text-sm focus:outline-none focus:border-accent-purple/50">
+              <option value="">🤖 Create new CEO (AI-generated)</option>
+              {availableAgents.map((a: Agent) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} — {a.type} {a.role !== 'worker' ? `(${a.role})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -465,7 +490,14 @@ export default function BusinessSetup() {
           </div>
           {!isDone && (
             <div className="flex flex-col items-center gap-2 text-sm text-slate-500">
-              {['Creating team agents', 'Resolving hierarchy', 'Generating AGENT.md files', 'Generating SOUL.md files', 'Generating HEARTBEAT.md files'].map((s, i) => (
+              {[
+                'Creating team agents',
+                'Resolving hierarchy',
+                'Generating identity files (AGENT.md, SOUL.md)',
+                'Setting up Goals & Plans',
+                'Configuring Tool Governance',
+                'Creating default Workflows',
+              ].map((s, i) => (
                 <div key={i} className="flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> {s}</div>
               ))}
             </div>

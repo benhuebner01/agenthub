@@ -958,7 +958,7 @@ router.get('/organizations/:id/daily-notes', async (req: Request, res: Response)
 
 router.post('/create-ceo', async (req: Request, res: Response) => {
   try {
-    const { name, description, industry, goals } = req.body;
+    const { name, description, industry, goals, existingCeoId } = req.body;
 
     if (!name || !description) {
       res.status(400).json({ error: 'name and description are required' });
@@ -1022,25 +1022,55 @@ Respond with ONLY valid JSON:
       updatedAt: now,
     }).returning();
 
-    // Create ONLY the CEO agent
-    const ceoConfig = teamPlan.ceoAgent || {};
-    const ceoId = uuidv4();
-    const [ceoAgent] = await db.insert(agents).values({
-      id: ceoId,
-      name: ceoConfig.name || `${name} CEO`,
-      description: ceoConfig.description || `CEO of ${name}`,
-      type: ceoConfig.type || 'claude',
-      config: ceoConfig.config || {},
-      status: 'active',
-      role: 'ceo',
-      jobDescription: ceoConfig.jobDescription || 'Lead the organization',
-      organizationId: orgId,
-      createdAt: now,
-      updatedAt: now,
-    }).returning();
+    let ceoAgent: any;
+
+    if (existingCeoId) {
+      // Use an existing agent as CEO — assign to this org and promote to CEO role
+      const [existing] = await db.select().from(agents).where(eq(agents.id, existingCeoId));
+      if (!existing) {
+        res.status(404).json({ error: 'Selected CEO agent not found' });
+        return;
+      }
+
+      const [updated] = await db.update(agents).set({
+        organizationId: orgId,
+        role: 'ceo',
+        parentAgentId: null,
+        updatedAt: now,
+      }).where(eq(agents.id, existingCeoId)).returning();
+      ceoAgent = updated;
+
+      // Update team plan's ceoAgent to reflect the actual agent
+      teamPlan.ceoAgent = {
+        name: ceoAgent.name,
+        description: ceoAgent.description || `CEO of ${name}`,
+        type: ceoAgent.type,
+        config: ceoAgent.config || {},
+        jobDescription: ceoAgent.jobDescription || 'Lead the organization',
+      };
+      await db.update(organizations).set({ teamPlanJson: JSON.stringify(teamPlan) }).where(eq(organizations.id, orgId));
+    } else {
+      // Create a NEW CEO agent from the AI plan
+      const ceoConfig = teamPlan.ceoAgent || {};
+      const ceoId = uuidv4();
+      const [newCeo] = await db.insert(agents).values({
+        id: ceoId,
+        name: ceoConfig.name || `${name} CEO`,
+        description: ceoConfig.description || `CEO of ${name}`,
+        type: ceoConfig.type || 'claude',
+        config: ceoConfig.config || {},
+        status: 'active',
+        role: 'ceo',
+        jobDescription: ceoConfig.jobDescription || 'Lead the organization',
+        organizationId: orgId,
+        createdAt: now,
+        updatedAt: now,
+      }).returning();
+      ceoAgent = newCeo;
+    }
 
     // Generate CEO agent files
-    generateAgentFiles(ceoId).catch((e: any) =>
+    generateAgentFiles(ceoAgent.id).catch((e: any) =>
       console.error('[Business] CEO file generation failed (non-critical):', e.message)
     );
 
