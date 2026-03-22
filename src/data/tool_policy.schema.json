@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentHub Tool Policy",
+  "type": "object",
+  "properties": {
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "allowedAgents"],
+        "properties": {
+          "name": { "type": "string" },
+          "class": { "type": "string", "enum": ["research", "generation", "execution", "communication", "filesystem"] },
+          "allowedAgents": { "type": "array", "items": { "type": "string" } },
+          "deniedAgents": { "type": "array", "items": { "type": "string" } },
+          "mode": { "type": "string", "enum": ["read_only", "draft_only", "execute", "execute_with_approval", "sandbox_only"] },
+          "requiredIf": { "type": "array", "items": { "type": "string" } },
+          "forbiddenIf": { "type": "array", "items": { "type": "string" } },
+          "approvalRequired": { "type": "boolean" },
+          "maxCallsPerTask": { "type": "integer" },
+          "maxCostUsd": { "type": "number" },
+          "postconditions": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "defaultPolicy": {
+      "type": "object",
+      "properties": {
+        "autoApproveThresholdUsd": { "type": "number" },
+        "requireApprovalForNewTools": { "type": "boolean" },
+        "maxRetriesPerStep": { "type": "integer" }
+      }
+    }
+  }
+}

@@ -535,6 +535,48 @@ export const fetchA2ACard = (endpoint: string) =>
     )
     .then((r) => r.data)
 
+// ─── CEO-First Workflow Types ────────────────────────────────────────────────
+
+export interface TeamPlan {
+  ceoAgent: { name: string; description: string; type: AgentType; config: Record<string, unknown>; jobDescription: string }
+  proposedTeam: Array<{
+    name: string; role: AgentRole; description: string; type: AgentType;
+    config: Record<string, unknown>; jobDescription: string; reportsTo: string
+  }>
+  costBreakdown?: Array<{ agentName: string; model: string; estimatedMonthlyTokens: number; estimatedMonthlyCostUsd: number }>
+  reasoning: string
+  estimatedMonthlyCostUsd: number
+  recommendation: string
+}
+
+export interface PrelaunchMessage {
+  id: string
+  organizationId: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+// ─── CEO-First Workflow API ─────────────────────────────────────────────────
+
+export const createCeo = (data: BusinessAnalysisInput) =>
+  api.post<{ data: { organization: Organization; ceoAgent: Agent; teamPlan: TeamPlan } }>('/business/create-ceo', data).then(r => r.data)
+
+export const getTeamPlan = (orgId: string) =>
+  api.get<{ data: TeamPlan; launchState: string }>(`/business/organizations/${orgId}/team-plan`).then(r => r.data)
+
+export const ceoPrelaunchChat = (orgId: string, message: string) =>
+  api.post<{ data: { message: string; planUpdated: boolean; updatedPlan?: TeamPlan } }>(`/business/organizations/${orgId}/ceo-prelaunch-chat`, { message }).then(r => r.data)
+
+export const getPrelaunchMessages = (orgId: string) =>
+  api.get<{ data: PrelaunchMessage[] }>(`/business/organizations/${orgId}/prelaunch-messages`).then(r => r.data)
+
+export const launchBusiness = (orgId: string, teamOverrides?: any[]) =>
+  api.post<{ data: { organization: Organization; ceoAgent: Agent; teamAgents: Agent[]; filesGenerated: number } }>(`/business/organizations/${orgId}/launch`, { teamOverrides }).then(r => r.data)
+
+export const batchProcessProposals = (actions: Array<{ proposalId: string; action: 'approve' | 'reject'; reason?: string }>) =>
+  api.post<{ data: Proposal[] }>('/business/proposals/batch', { actions }).then(r => r.data)
+
 // ─── Business / Organizations ─────────────────────────────────────────────────
 
 export const analyzeBusiness = (data: BusinessAnalysisInput) =>

@@ -11,6 +11,18 @@ export const organizations = sqliteTable('organizations', {
   status: text('status').notNull().default('active'), // 'active' | 'paused'
   createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+  setupMode: text('setup_mode').default('wizard'), // 'wizard' | 'manual' | 'import'
+  teamPlanJson: text('team_plan_json'), // stores the full AI team plan as JSON string
+  launchState: text('launch_state').default('draft'), // 'draft' | 'ceo_created' | 'launched'
+});
+
+// CEO Prelaunch Messages table — conversation history during setup wizard
+export const ceoPrelaunchMessages = sqliteTable('ceo_prelaunch_messages', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'user' | 'assistant'
+  content: text('content').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Agents table
@@ -217,6 +229,7 @@ export const organizationsRelations = relations(organizations, ({ many }) => ({
   agents: many(agents),
   proposals: many(proposals),
   sharedMemory: many(sharedMemory),
+  ceoPrelaunchMessages: many(ceoPrelaunchMessages),
 }));
 
 export const sharedMemoryRelations = relations(sharedMemory, ({ one }) => ({
@@ -290,6 +303,10 @@ export const tacitKnowledgeRelations = relations(tacitKnowledge, ({ one }) => ({
   agent: one(agents, { fields: [tacitKnowledge.agentId], references: [agents.id] }),
 }));
 
+export const ceoPrelaunchMessagesRelations = relations(ceoPrelaunchMessages, ({ one }) => ({
+  organization: one(organizations, { fields: [ceoPrelaunchMessages.organizationId], references: [organizations.id] }),
+}));
+
 // Type exports
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
@@ -323,3 +340,5 @@ export type KnowledgeBase = typeof knowledgeBase.$inferSelect;
 export type NewKnowledgeBase = typeof knowledgeBase.$inferInsert;
 export type TacitKnowledge = typeof tacitKnowledge.$inferSelect;
 export type NewTacitKnowledge = typeof tacitKnowledge.$inferInsert;
+export type CeoPrelaunchMessage = typeof ceoPrelaunchMessages.$inferSelect;
+export type NewCeoPrelaunchMessage = typeof ceoPrelaunchMessages.$inferInsert;

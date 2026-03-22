@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentHub Team Plan",
+  "type": "object",
+  "required": ["ceoAgent", "proposedTeam"],
+  "properties": {
+    "ceoAgent": {
+      "type": "object",
+      "required": ["name", "type", "jobDescription"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string" },
+        "config": { "type": "object" },
+        "jobDescription": { "type": "string" }
+      }
+    },
+    "proposedTeam": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "role", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "role": { "type": "string", "enum": ["manager", "worker", "specialist"] },
+          "description": { "type": "string" },
+          "type": { "type": "string" },
+          "config": { "type": "object" },
+          "jobDescription": { "type": "string" },
+          "reportsTo": { "type": "string" }
+        }
+      }
+    },
+    "costBreakdown": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agentName": { "type": "string" },
+          "model": { "type": "string" },
+          "estimatedMonthlyTokens": { "type": "number" },
+          "estimatedMonthlyCostUsd": { "type": "number" }
+        }
+      }
+    },
+    "reasoning": { "type": "string" },
+    "estimatedMonthlyCostUsd": { "type": "number" },
+    "recommendation": { "type": "string" }
+  }
+}

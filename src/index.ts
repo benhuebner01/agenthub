@@ -415,6 +415,19 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_agent_id ON knowledge_base(agent_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_organization_id ON knowledge_base(organization_id);
         CREATE INDEX IF NOT EXISTS idx_tacit_knowledge_agent_id ON tacit_knowledge(agent_id);
+
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS setup_mode TEXT DEFAULT 'wizard';
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS team_plan_json TEXT;
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS launch_state TEXT DEFAULT 'draft';
+
+        CREATE TABLE IF NOT EXISTS ceo_prelaunch_messages (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_ceo_prelaunch_messages_org_id ON ceo_prelaunch_messages(organization_id);
       `);
 
       // Add new columns to agents if they don't exist
@@ -609,6 +622,14 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_agent_id ON knowledge_base(agent_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_organization_id ON knowledge_base(organization_id);
         CREATE INDEX IF NOT EXISTS idx_tacit_knowledge_agent_id ON tacit_knowledge(agent_id);
+        CREATE TABLE IF NOT EXISTS ceo_prelaunch_messages (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ceo_prelaunch_messages_org_id ON ceo_prelaunch_messages(organization_id);
       `);
     } catch (migrateErr) {
       console.warn('[DB] Migration warning (tables may already exist):', (migrateErr as Error).message);
@@ -619,6 +640,10 @@ async function runMigrations(): Promise<void> {
     addColumnSafe(`ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'`);
     addColumnSafe(`ALTER TABLE agents ADD COLUMN job_description TEXT`);
     addColumnSafe(`ALTER TABLE agents ADD COLUMN organization_id TEXT`);
+
+    addColumnSafe(`ALTER TABLE organizations ADD COLUMN setup_mode TEXT DEFAULT 'wizard'`);
+    addColumnSafe(`ALTER TABLE organizations ADD COLUMN team_plan_json TEXT`);
+    addColumnSafe(`ALTER TABLE organizations ADD COLUMN launch_state TEXT DEFAULT 'draft'`);
 
     console.log('[DB] SQLite migrations complete');
   }

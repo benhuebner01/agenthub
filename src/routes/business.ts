@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { agents, organizations, proposals, runs, sharedMemory, knowledgeBase, dailyNotes } from '../db/schema';
+import { agents, organizations, proposals, runs, sharedMemory, knowledgeBase, dailyNotes, ceoPrelaunchMessages } from '../db/schema';
 import { eq, desc, and, gte, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { getApiKeyForProvider } from './settings';
+import { launchOrganization } from '../services/launchOrchestrator';
+import { generateAgentFiles } from '../services/agent-files';
 
 const router = Router();
 
@@ -947,6 +949,345 @@ router.get('/organizations/:id/daily-notes', async (req: Request, res: Response)
   } catch (err: any) {
     console.error('[Business] GET /organizations/:id/daily-notes error:', err);
     res.status(500).json({ error: 'Failed to fetch org daily notes' });
+  }
+});
+
+// ─── POST /api/business/create-ceo ───────────────────────────────────────────
+// CEO-first flow: analyze business, create org + CEO only, store team plan for later
+
+router.post('/create-ceo', async (req: Request, res: Response) => {
+  try {
+    const { name, description, industry, goals } = req.body;
+
+    if (!name || !description) {
+      res.status(400).json({ error: 'name and description are required' });
+      return;
+    }
+
+    const goalsStr = Array.isArray(goals) ? goals.join('\n- ') : (goals || 'General productivity');
+
+    // Reuse the existing analysis prompt (copy from the /analyze endpoint's systemPrompt)
+    const systemPrompt = `You are an expert AI business architect designing agent organizations.
+
+HIERARCHY RULES (strict):
+- Exactly 1 CEO at the root. Every agent reports to exactly one manager.
+- Tree structure: CEO → Managers → Workers/Specialists
+
+AGENT TYPES: claude, openai, http, bash, claude-code, openclaw, a2a, mcp, internal
+
+Respond with ONLY valid JSON:
+{
+  "organization": { "name": "string", "description": "string", "industry": "string", "goals": ["string"] },
+  "ceoAgent": {
+    "name": "string", "description": "string", "type": "claude",
+    "config": { "model": "claude-sonnet-4-6", "system_prompt": "..." },
+    "jobDescription": "string"
+  },
+  "proposedTeam": [
+    { "name": "string", "role": "manager|worker|specialist", "description": "string",
+      "type": "claude|openai|http|bash|claude-code|openclaw|a2a|mcp|internal",
+      "config": { "model": "..." }, "jobDescription": "string", "reportsTo": "ceo|<agentName>" }
+  ],
+  "costBreakdown": [
+    { "agentName": "string", "model": "string", "estimatedMonthlyTokens": 0, "estimatedMonthlyCostUsd": 0 }
+  ],
+  "reasoning": "string",
+  "estimatedMonthlyCostUsd": 0,
+  "recommendation": "string"
+}`;
+
+    const userMessage = `Business: ${name}\nIndustry: ${industry || 'Not specified'}\nDescription: ${description}\nGoals:\n- ${goalsStr}\n\nDesign the optimal AI agent organization with 1 CEO and 3-6 team agents.`;
+
+    const rawResponse = await callAI(systemPrompt, userMessage);
+    let jsonStr = rawResponse.trim();
+    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) jsonStr = jsonMatch[1];
+    const teamPlan = JSON.parse(jsonStr);
+
+    const now = new Date().toISOString();
+    const orgId = uuidv4();
+
+    // Create organization with team plan stored (not launched yet)
+    const [org] = await db.insert(organizations).values({
+      id: orgId,
+      name: teamPlan.organization?.name || name,
+      description: teamPlan.organization?.description || description,
+      industry: teamPlan.organization?.industry || industry || null,
+      goals: teamPlan.organization?.goals || goals || [],
+      setupMode: 'wizard',
+      teamPlanJson: JSON.stringify(teamPlan),
+      launchState: 'ceo_created',
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+
+    // Create ONLY the CEO agent
+    const ceoConfig = teamPlan.ceoAgent || {};
+    const ceoId = uuidv4();
+    const [ceoAgent] = await db.insert(agents).values({
+      id: ceoId,
+      name: ceoConfig.name || `${name} CEO`,
+      description: ceoConfig.description || `CEO of ${name}`,
+      type: ceoConfig.type || 'claude',
+      config: ceoConfig.config || {},
+      status: 'active',
+      role: 'ceo',
+      jobDescription: ceoConfig.jobDescription || 'Lead the organization',
+      organizationId: orgId,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+
+    // Generate CEO agent files
+    generateAgentFiles(ceoId).catch((e: any) =>
+      console.error('[Business] CEO file generation failed (non-critical):', e.message)
+    );
+
+    // Auto-generate org memory (async)
+    const allTeamNames = (teamPlan.proposedTeam || []).map((a: any) => `${a.name} (${a.role})`).join(', ');
+    generateOrgMemory(orgId, org, ceoAgent, allTeamNames).catch((e: any) =>
+      console.error('[Business] Org memory generation failed (non-critical):', e.message)
+    );
+
+    res.status(201).json({
+      data: {
+        organization: org,
+        ceoAgent,
+        teamPlan,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Business] POST /create-ceo error:', err);
+    res.status(500).json({ error: 'Failed to create CEO', details: err.message });
+  }
+});
+
+// ─── GET /api/business/organizations/:id/team-plan ───────────────────────────
+
+router.get('/organizations/:id/team-plan', async (req: Request, res: Response) => {
+  try {
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, req.params.id));
+    if (!org) { res.status(404).json({ error: 'Organization not found' }); return; }
+
+    const plan = org.teamPlanJson ? JSON.parse(org.teamPlanJson as string) : null;
+    res.json({ data: plan, launchState: org.launchState });
+  } catch (err: any) {
+    console.error('[Business] GET /team-plan error:', err);
+    res.status(500).json({ error: 'Failed to fetch team plan' });
+  }
+});
+
+// ─── POST /api/business/organizations/:id/ceo-prelaunch-chat ────────────────
+
+router.post('/organizations/:id/ceo-prelaunch-chat', async (req: Request, res: Response) => {
+  try {
+    const { message } = req.body;
+    if (!message) { res.status(400).json({ error: 'message is required' }); return; }
+
+    const orgId = req.params.id;
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId));
+    if (!org) { res.status(404).json({ error: 'Organization not found' }); return; }
+
+    const teamPlan = org.teamPlanJson ? JSON.parse(org.teamPlanJson as string) : {};
+
+    // Find CEO agent
+    const [ceoAgent] = await db.select().from(agents)
+      .where(eq(agents.organizationId, orgId))
+      .limit(1);
+
+    // Load previous messages
+    const previousMessages = await db.select().from(ceoPrelaunchMessages)
+      .where(eq(ceoPrelaunchMessages.organizationId, orgId));
+
+    const now = new Date().toISOString();
+
+    // Store user message
+    await db.insert(ceoPrelaunchMessages).values({
+      id: uuidv4(),
+      organizationId: orgId,
+      role: 'user',
+      content: message,
+      createdAt: now,
+    });
+
+    // Build conversation for AI
+    const systemPrompt = `You are ${ceoAgent?.name || 'the CEO'} of ${org.name}.
+
+Organization: ${org.name}
+Industry: ${org.industry || 'General'}
+Description: ${org.description || 'N/A'}
+Goals: ${Array.isArray(org.goals) ? (org.goals as string[]).join(', ') : 'Not specified'}
+
+The following team plan has been proposed:
+${JSON.stringify(teamPlan.proposedTeam || [], null, 2)}
+
+The human owner is discussing this plan with you before launch.
+- Help refine the plan and answer questions
+- If you suggest changes to the team plan, output a JSON block wrapped in <plan_update>...</plan_update> tags
+- Be strategic, specific, and actionable
+- Keep responses concise`;
+
+    const conversationHistory = previousMessages
+      .sort((a: any, b: any) => a.createdAt.localeCompare(b.createdAt))
+      .map((m: any) => `${m.role === 'user' ? 'Human' : 'CEO'}: ${m.content}`)
+      .join('\n\n');
+
+    const userMsg = conversationHistory
+      ? `Previous conversation:\n${conversationHistory}\n\nHuman: ${message}`
+      : message;
+
+    const aiResponse = await callAI(systemPrompt, userMsg);
+
+    // Store assistant response
+    await db.insert(ceoPrelaunchMessages).values({
+      id: uuidv4(),
+      organizationId: orgId,
+      role: 'assistant',
+      content: aiResponse,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Check for plan updates
+    let planUpdated = false;
+    let updatedPlan = teamPlan;
+    const planUpdateMatch = aiResponse.match(/<plan_update>([\s\S]*?)<\/plan_update>/);
+    if (planUpdateMatch) {
+      try {
+        const planDelta = JSON.parse(planUpdateMatch[1]);
+        updatedPlan = { ...teamPlan, ...planDelta };
+        await db.update(organizations)
+          .set({ teamPlanJson: JSON.stringify(updatedPlan), updatedAt: new Date().toISOString() })
+          .where(eq(organizations.id, orgId));
+        planUpdated = true;
+      } catch { /* plan update parse failed, ignore */ }
+    }
+
+    res.json({
+      data: {
+        message: aiResponse,
+        planUpdated,
+        updatedPlan: planUpdated ? updatedPlan : undefined,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Business] POST /ceo-prelaunch-chat error:', err);
+    res.status(500).json({ error: 'Chat failed', details: err.message });
+  }
+});
+
+// ─── GET /api/business/organizations/:id/prelaunch-messages ──────────────────
+
+router.get('/organizations/:id/prelaunch-messages', async (req: Request, res: Response) => {
+  try {
+    const messages = await db.select().from(ceoPrelaunchMessages)
+      .where(eq(ceoPrelaunchMessages.organizationId, req.params.id));
+    res.json({ data: messages.sort((a: any, b: any) => a.createdAt.localeCompare(b.createdAt)) });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// ─── POST /api/business/organizations/:id/launch ────────────────────────────
+
+router.post('/organizations/:id/launch', async (req: Request, res: Response) => {
+  try {
+    const orgId = req.params.id;
+    const { teamOverrides } = req.body;
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId));
+    if (!org) { res.status(404).json({ error: 'Organization not found' }); return; }
+
+    if (org.launchState === 'launched') {
+      res.status(400).json({ error: 'Organization already launched' });
+      return;
+    }
+
+    const teamPlan = org.teamPlanJson ? JSON.parse(org.teamPlanJson as string) : { proposedTeam: [] };
+
+    // Find CEO
+    const orgAgents = await db.select().from(agents).where(eq(agents.organizationId, orgId));
+    const ceo = orgAgents.find((a: any) => a.role === 'ceo');
+    if (!ceo) { res.status(400).json({ error: 'No CEO agent found. Create CEO first.' }); return; }
+
+    // Launch via orchestrator
+    const result = await launchOrganization(orgId, ceo.id, teamPlan, {
+      teamOverrides: teamOverrides || undefined,
+    });
+
+    // Generate first-run knowledge (async, non-blocking)
+    generateFirstRunKnowledge(orgId, org, ceo, '').catch((e: any) =>
+      console.error('[Business] First-run knowledge failed:', e.message)
+    );
+
+    res.status(201).json({
+      data: {
+        organization: { ...org, launchState: 'launched' },
+        ceoAgent: ceo,
+        teamAgents: result.teamAgents,
+        filesGenerated: result.filesGenerated,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Business] POST /launch error:', err);
+    res.status(500).json({ error: 'Launch failed', details: err.message });
+  }
+});
+
+// ─── POST /api/business/proposals/batch ─────────────────────────────────────
+
+router.post('/proposals/batch', async (req: Request, res: Response) => {
+  try {
+    const { actions } = req.body as { actions: Array<{ proposalId: string; action: 'approve' | 'reject'; reason?: string }> };
+    if (!Array.isArray(actions) || actions.length === 0) {
+      res.status(400).json({ error: 'actions array is required' });
+      return;
+    }
+
+    const results: any[] = [];
+    const now = new Date().toISOString();
+
+    for (const { proposalId, action, reason } of actions) {
+      const [proposal] = await db.select().from(proposals).where(eq(proposals.id, proposalId));
+      if (!proposal) continue;
+
+      const status = action === 'approve' ? 'approved' : 'rejected';
+      const [updated] = await db.update(proposals)
+        .set({ status, userNotes: reason || null, resolvedAt: now })
+        .where(eq(proposals.id, proposalId))
+        .returning();
+
+      // If approved hire_agent, create the agent
+      if (action === 'approve' && proposal.type === 'hire_agent') {
+        const details = typeof proposal.details === 'string' ? JSON.parse(proposal.details) : proposal.details;
+        if (details?.agentConfig) {
+          const newId = uuidv4();
+          const [newAgent] = await db.insert(agents).values({
+            id: newId,
+            name: details.agentConfig.name || 'New Agent',
+            description: details.agentConfig.description || null,
+            type: details.agentConfig.type || 'claude',
+            config: details.agentConfig.config || {},
+            status: 'active',
+            role: details.agentConfig.role || 'worker',
+            jobDescription: details.agentConfig.jobDescription || null,
+            organizationId: proposal.organizationId,
+            createdAt: now,
+            updatedAt: now,
+          }).returning();
+
+          // Generate files for new agent
+          generateAgentFiles(newId).catch(() => {});
+          results.push({ ...updated, newAgent });
+          continue;
+        }
+      }
+      results.push(updated);
+    }
+
+    res.json({ data: results });
+  } catch (err: any) {
+    console.error('[Business] POST /proposals/batch error:', err);
+    res.status(500).json({ error: 'Batch processing failed' });
   }
 });
 
