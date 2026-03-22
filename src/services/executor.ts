@@ -103,6 +103,7 @@ export interface ExecutionResult {
   costUsd: number;
   model?: string;
   error?: string;
+  runId?: string;
 }
 
 // ─── Memory Helpers ───────────────────────────────────────────────────────────
@@ -774,6 +775,7 @@ export async function executeAgent(
       role: agentRecord.role,
     });
 
+    result.runId = runId;
     return result;
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -812,6 +814,7 @@ export async function executeAgent(
       tokensUsed: 0,
       costUsd: 0,
       error: errorMessage,
+      runId,
     };
   }
 }

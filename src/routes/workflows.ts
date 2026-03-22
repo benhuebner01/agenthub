@@ -139,4 +139,38 @@ router.post('/:id/run', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Workflow Execution Engine ────────────────────────────────────────────────
+
+import { executeWorkflowStep, runWorkflow, resumeWorkflowRun } from '../services/workflowEngine';
+
+// POST /api/workflows/runs/:runId/execute — run entire workflow until done/blocked
+router.post('/runs/:runId/execute', async (req: Request, res: Response) => {
+  try {
+    const result = await runWorkflow(req.params.runId);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/workflows/runs/:runId/advance — execute single next step
+router.post('/runs/:runId/advance', async (req: Request, res: Response) => {
+  try {
+    const result = await executeWorkflowStep(req.params.runId);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/workflows/runs/:runId/resume — resume after approval
+router.post('/runs/:runId/resume', async (req: Request, res: Response) => {
+  try {
+    const result = await resumeWorkflowRun(req.params.runId);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

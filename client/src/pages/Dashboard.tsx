@@ -8,8 +8,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts'
-import { Bot, PlayCircle, TrendingUp, DollarSign } from 'lucide-react'
-import { getAgents, getRuns, getBudgets, Run } from '../api/client'
+import { Bot, PlayCircle, TrendingUp, DollarSign, Target, Zap, Loader2 } from 'lucide-react'
+import { getAgents, getRuns, getBudgets, getGoals, executeAllReadySteps, Run } from '../api/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import StatusBadge from '../components/StatusBadge'
 
 function formatDuration(start: string | null, end: string | null): string {
@@ -97,6 +98,28 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   })
 
+  const { data: goalsData } = useQuery({
+    queryKey: ['goals-active'],
+    queryFn: () => getGoals({ status: 'active' }),
+    refetchInterval: 15_000,
+  })
+
+  const { data: goalsInProgress } = useQuery({
+    queryKey: ['goals-in-progress'],
+    queryFn: () => getGoals({ status: 'in_progress' }),
+    refetchInterval: 15_000,
+  })
+
+  const queryClient = useQueryClient()
+  const executeAllMutation = useMutation({
+    mutationFn: (goalId: string) => executeAllReadySteps(goalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['goals-active'] })
+      queryClient.invalidateQueries({ queryKey: ['goals-in-progress'] })
+      queryClient.invalidateQueries({ queryKey: ['runs'] })
+    },
+  })
+
   const agents = agentsData?.data ?? []
   const runs = runsData?.data ?? []
   const budgets = budgetsData?.data ?? []
@@ -116,6 +139,9 @@ export default function Dashboard() {
     return sum + (isNaN(cost) ? 0 : cost)
   }, 0)
 
+  const activeGoals = [...(goalsData || []), ...(goalsInProgress || [])]
+    .filter((g, i, arr) => arr.findIndex(x => x.id === g.id) === i) // dedupe
+
   const chartData = buildRunsPerDay(runs)
   const recentRuns = runs.slice(0, 10)
 
@@ -129,13 +155,20 @@ export default function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard
           icon={Bot}
           label="Total Agents"
           value={isLoading ? '...' : agents.length}
           sub={`${agents.filter((a) => a.status === 'active').length} active`}
           color="bg-accent-purple/20 text-accent-purple"
+        />
+        <StatCard
+          icon={Target}
+          label="Active Goals"
+          value={activeGoals.length}
+          sub={`${activeGoals.filter(g => (g as any).progress > 0).length} in progress`}
+          color="bg-indigo-500/20 text-indigo-400"
         />
         <StatCard
           icon={PlayCircle}
@@ -159,6 +192,60 @@ export default function Dashboard() {
           color="bg-yellow-500/20 text-yellow-400"
         />
       </div>
+
+      {/* Active Goals Progress */}
+      {activeGoals.length > 0 && (
+        <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-dark-border flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-white">Active Goals</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Decide → Check → Execute → Verify → Commit</p>
+            </div>
+          </div>
+          <div className="divide-y divide-dark-border">
+            {activeGoals.slice(0, 5).map((goal: any) => {
+              const progress = goal.progress || 0
+              const barColor = progress >= 80 ? 'bg-green-500' : progress >= 40 ? 'bg-blue-500' : 'bg-accent-purple'
+              const priorityColors: Record<string, string> = {
+                critical: 'text-red-400 bg-red-400/10 border-red-400/30',
+                high: 'text-orange-400 bg-orange-400/10 border-orange-400/30',
+                medium: 'text-blue-400 bg-blue-400/10 border-blue-400/30',
+                low: 'text-slate-400 bg-slate-400/10 border-slate-400/30',
+              }
+              return (
+                <div key={goal.id} className="px-5 py-4 flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-sm font-medium text-slate-200 truncate">{goal.title}</p>
+                      <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${priorityColors[goal.priority] || priorityColors.medium}`}>
+                        {goal.priority}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-dark-bg rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${progress}%` }} />
+                      </div>
+                      <span className="text-xs text-slate-500 font-mono w-8 text-right">{progress}%</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => executeAllMutation.mutate(goal.id)}
+                    disabled={executeAllMutation.isPending}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-purple/20 text-accent-purple hover:bg-accent-purple/30 border border-accent-purple/30 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {executeAllMutation.isPending ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Zap className="w-3 h-3" />
+                    )}
+                    Run Steps
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent runs table */}

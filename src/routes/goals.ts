@@ -270,4 +270,37 @@ router.post('/:id/advance', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Step Execution ──────────────────────────────────────────────────────────
+
+import { executeStep, executeReadySteps } from '../services/stepExecutor';
+
+// POST /api/goals/:goalId/steps/:stepId/execute — execute a single ready step
+router.post('/:goalId/steps/:stepId/execute', async (req: Request, res: Response) => {
+  try {
+    const result = await executeStep(req.params.stepId, { triggeredBy: 'manual' });
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/goals/:id/execute-all — execute all ready steps for a goal
+router.post('/:id/execute-all', async (req: Request, res: Response) => {
+  try {
+    const results = await executeReadySteps(req.params.id, { triggeredBy: 'manual' });
+    res.json({
+      executed: results.length,
+      results,
+      summary: {
+        completed: results.filter(r => r.status === 'completed' || r.status === 'verified').length,
+        failed: results.filter(r => r.status === 'failed').length,
+        retried: results.filter(r => r.status === 'retry').length,
+        blocked: results.filter(r => r.status === 'blocked').length,
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

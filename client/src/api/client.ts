@@ -840,6 +840,13 @@ export const activateGoal = (id: string) =>
 export const advanceGoal = (id: string) =>
   api.post(`/goals/${id}/advance`).then(r => r.data);
 
+// Step Execution
+export const executeStep = (goalId: string, stepId: string) =>
+  api.post(`/goals/${goalId}/steps/${stepId}/execute`).then(r => r.data);
+
+export const executeAllReadySteps = (goalId: string) =>
+  api.post(`/goals/${goalId}/execute-all`).then(r => r.data);
+
 // ─── Tool Policies ─────────────────────────────────────────────────────────
 
 export interface ToolPolicy {
@@ -989,5 +996,15 @@ export const getWorkflowRuns = () =>
 
 export const updateWorkflowRun = (runId: string, data: Partial<WorkflowRun>) =>
   api.put<WorkflowRun>(`/workflows/runs/${runId}`, data).then(r => r.data);
+
+// Workflow Execution
+export const executeWorkflowRun = (runId: string) =>
+  api.post(`/workflows/runs/${runId}/execute`).then(r => r.data);
+
+export const advanceWorkflowRun = (runId: string) =>
+  api.post(`/workflows/runs/${runId}/advance`).then(r => r.data);
+
+export const resumeWorkflowRun = (runId: string) =>
+  api.post(`/workflows/runs/${runId}/resume`).then(r => r.data);
 
 export default api
