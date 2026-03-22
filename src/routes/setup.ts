@@ -1,40 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { db, mode } from '../db/index';
-import { settings, agents } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { agents } from '../db/schema';
 import axios from 'axios';
+import { getSetting, setSetting, storeApiKeyEncrypted } from './settings';
 
 const router = Router();
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-async function getSetting(key: string): Promise<string | null> {
-  try {
-    const [row] = await db.select().from(settings).where(eq(settings.key, key));
-    return row ? row.value : null;
-  } catch {
-    return null;
-  }
-}
-
-async function setSetting(key: string, value: string): Promise<void> {
-  try {
-    // Upsert — try insert, then update on conflict
-    const existing = await getSetting(key);
-    const now = new Date().toISOString();
-    if (existing !== null) {
-      await db
-        .update(settings)
-        .set({ value, updatedAt: now })
-        .where(eq(settings.key, key));
-    } else {
-      await db.insert(settings).values({ key, value, updatedAt: now });
-    }
-  } catch (err) {
-    console.error(`[Setup] setSetting error for key "${key}":`, err);
-    throw err;
-  }
-}
 
 // ─── GET /api/setup/status ────────────────────────────────────────────────────
 
@@ -87,14 +57,15 @@ router.post('/api-keys', async (req: Request, res: Response) => {
       apiSecret?: string;
     };
 
+    // P1-5: Store API keys encrypted (not plaintext)
     if (anthropicKey && anthropicKey.trim()) {
-      await setSetting('anthropic_api_key', anthropicKey.trim());
+      await storeApiKeyEncrypted('anthropic', 'Anthropic (Setup)', anthropicKey.trim());
       // Also set in process.env for current session
       process.env.ANTHROPIC_API_KEY = anthropicKey.trim();
     }
 
     if (openaiKey && openaiKey.trim()) {
-      await setSetting('openai_api_key', openaiKey.trim());
+      await storeApiKeyEncrypted('openai', 'OpenAI (Setup)', openaiKey.trim());
       process.env.OPENAI_API_KEY = openaiKey.trim();
     }
 
@@ -103,7 +74,7 @@ router.post('/api-keys', async (req: Request, res: Response) => {
       process.env.API_SECRET = apiSecret.trim();
     }
 
-    res.json({ success: true, message: 'API keys saved' });
+    res.json({ success: true, message: 'API keys saved (encrypted)' });
   } catch (err) {
     console.error('[Setup] POST /api-keys error:', err);
     res.status(500).json({ error: 'Failed to save API keys' });

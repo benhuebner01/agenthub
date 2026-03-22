@@ -70,6 +70,34 @@ export async function getApiKeyForProvider(provider: string): Promise<string | n
   return null;
 }
 
+// Helper: store an API key encrypted (used by setup.ts)
+export async function storeApiKeyEncrypted(provider: string, name: string, rawKey: string): Promise<void> {
+  const encKey = await getEncryptionKey();
+  const encryptedKey = encrypt(rawKey, encKey);
+  const keyHint = rawKey.slice(-4);
+  const now = new Date().toISOString();
+
+  // Upsert: deactivate existing keys for this provider, then insert new
+  const existing = await db.select().from(apiKeys)
+    .where(and(eq(apiKeys.provider, provider), eq(apiKeys.isActive, true)));
+
+  if (existing.length > 0) {
+    await db.update(apiKeys)
+      .set({ encryptedKey, keyHint, updatedAt: now })
+      .where(eq(apiKeys.id, existing[0].id));
+  } else {
+    await db.insert(apiKeys).values({
+      name,
+      provider,
+      encryptedKey,
+      keyHint,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+}
+
 // Helper: get a setting value
 export async function getSetting(key: string): Promise<string | null> {
   const [row] = await db.select().from(settings).where(eq(settings.key, key));

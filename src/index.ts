@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 
 // Routes
 import agentsRouter from './routes/agents';
@@ -25,13 +26,75 @@ import { mode as dbMode } from './db/index';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Middleware
-app.use(cors());
+// ─── P0-3: CORS Allowlist ────────────────────────────────────────────────────
+// In production, only allow configured origins. In dev, allow all.
+const corsOptions: cors.CorsOptions = (() => {
+  const originsEnv = process.env.CORS_ORIGINS; // comma-separated: "https://example.com,https://app.example.com"
+  if (originsEnv) {
+    const allowedOrigins = originsEnv.split(',').map(o => o.trim()).filter(Boolean);
+    return {
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        // Allow requests with no origin (server-to-server, curl, mobile apps)
+        if (!origin) { callback(null, true); return; }
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS: Origin ${origin} not allowed`));
+        }
+      },
+      credentials: true,
+    };
+  }
+  // Dev mode: allow all origins (backward compatible)
+  if (!IS_PRODUCTION) {
+    return { origin: true, credentials: true };
+  }
+  // Production without CORS_ORIGINS: restrictive — same-origin only
+  return {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin) { callback(null, true); return; } // server-to-server
+      callback(new Error('CORS: No CORS_ORIGINS configured in production'));
+    },
+    credentials: true,
+  };
+})();
+app.use(cors(corsOptions));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging
+// ─── P0-4: Rate Limiting ─────────────────────────────────────────────────────
+// Global rate limit: 200 requests per minute per IP
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+  skip: (req) => req.path === '/api/health', // health checks exempt
+});
+app.use('/api', globalLimiter);
+
+// Strict rate limits for sensitive endpoints
+const setupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many setup requests, please try again later.' },
+});
+
+const executionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many execution requests, please try again later.' },
+});
+
+// Request logging (redact sensitive headers in production)
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -41,42 +104,84 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Setup routes — NO auth required (must be before apiAuthMiddleware)
-app.use('/api/setup', setupRouter);
+// ─── P0-2: Setup Routes — Protected by Bootstrap Token in Production ─────────
+// In production, setup endpoints require SETUP_TOKEN to prevent unauthorized config changes.
+// In dev mode, setup works without a token (backward compatible).
+app.use('/api/setup', setupLimiter, (req: Request, res: Response, next: NextFunction): void => {
+  // GET /api/setup/status is always allowed (needed to check if setup is complete)
+  if (req.method === 'GET' && req.path === '/status') {
+    next();
+    return;
+  }
+
+  const setupToken = process.env.SETUP_TOKEN;
+
+  // In production, require SETUP_TOKEN for mutation endpoints
+  if (IS_PRODUCTION && setupToken) {
+    const providedToken = req.headers['x-setup-token'] as string || req.body?.setupToken;
+    if (!providedToken || providedToken !== setupToken) {
+      res.status(403).json({
+        error: 'Setup requires authentication in production.',
+        hint: 'Provide X-Setup-Token header or setupToken in body.',
+      });
+      return;
+    }
+  }
+
+  next();
+}, setupRouter);
 
 // Presets — NO auth required (read-only public data)
 app.use('/api/presets', presetsRouter);
 
-// Internal agent chat — NO auth required
-app.use('/api/internal-agent', internalAgentRouter);
+// Internal agent chat — auth required for POST, rate limited
+app.use('/api/internal-agent', executionLimiter, internalAgentRouter);
 
-// API Key authentication middleware (protect mutation endpoints)
+// ─── P0-1: API Key Authentication — Fail-Closed in Production ────────────────
+// In production: ALL requests (including GET) require X-API-Key header.
+// In dev without API_SECRET: auth is bypassed (backward compatible for local development).
+// Unsafe defaults like "change-me-in-production" are blocked in production.
 const apiAuthMiddleware = (req: Request, res: Response, next: NextFunction): void => {
-  if (req.path.startsWith('/setup')) {
+  // OPTIONS always passes (CORS preflight)
+  if (req.method === 'OPTIONS') {
     next();
     return;
   }
 
   const apiSecret = process.env.API_SECRET;
 
+  // ── Production fail-closed ──
+  if (IS_PRODUCTION) {
+    if (!apiSecret || apiSecret === 'change-me-in-production') {
+      res.status(503).json({
+        error: 'Server misconfigured: API_SECRET not set for production.',
+        hint: 'Set a strong API_SECRET environment variable before starting in production mode.',
+      });
+      return;
+    }
+
+    // ALL methods require auth in production (including GET)
+    const apiKey = req.headers['x-api-key'] as string;
+    if (!apiKey || apiKey !== apiSecret) {
+      res.status(401).json({ error: 'Unauthorized. Provide valid X-API-Key header.' });
+      return;
+    }
+
+    next();
+    return;
+  }
+
+  // ── Development mode ──
+  // If no API_SECRET configured, allow everything (local dev convenience)
   if (!apiSecret || apiSecret === 'change-me-in-production') {
     next();
     return;
   }
 
-  if (req.method === 'GET') {
-    next();
-    return;
-  }
-
-  if (req.method === 'OPTIONS') {
-    next();
-    return;
-  }
-
+  // API_SECRET is set in dev — enforce auth on ALL methods (including GET)
   const apiKey = req.headers['x-api-key'] as string;
   if (!apiKey || apiKey !== apiSecret) {
-    res.status(401).json({ error: 'Unauthorized. Provide X-API-Key header.' });
+    res.status(401).json({ error: 'Unauthorized. Provide valid X-API-Key header.' });
     return;
   }
 
@@ -89,23 +194,22 @@ app.use('/api', apiAuthMiddleware);
 app.use('/api/agents', agentsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/budgets', budgetsRouter);
-app.use('/api/runs', runsRouter);
+app.use('/api/runs', executionLimiter, runsRouter);
 app.use('/api/business', businessRouter);
 app.use('/api/costs', costsRouter);
 app.use('/api/settings', settingsRouter);
 
 // Note: Proposals are served at /api/business/proposals by the business router
 
-// Health check endpoint
+// Health check endpoint (no auth, no sensitive data)
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    env: process.env.NODE_ENV,
-    dbMode,
-    schedulerMode: getSchedulerMode(),
+    // Don't expose env details in production
+    ...(IS_PRODUCTION ? {} : { env: process.env.NODE_ENV, dbMode, schedulerMode: getSchedulerMode() }),
   });
 });
 
@@ -122,10 +226,21 @@ app.get('*', (req: Request, res: Response) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
-// Global error handler
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error('[Server] Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error', message: err.message });
+// Global error handler — never expose stack traces in production
+app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+  // CORS errors get a 403
+  if (err.message && err.message.startsWith('CORS:')) {
+    console.warn(`[CORS] Blocked: ${err.message} from ${req.headers.origin}`);
+    res.status(403).json({ error: 'Origin not allowed' });
+    return;
+  }
+
+  console.error('[Server] Unhandled error:', IS_PRODUCTION ? err.message : err);
+  res.status(500).json({
+    error: 'Internal server error',
+    // Only expose error details in development
+    ...(IS_PRODUCTION ? {} : { message: err.message }),
+  });
 });
 
 async function runMigrations(): Promise<void> {
@@ -517,6 +632,43 @@ async function main() {
   console.log(`Scheduler mode: ${process.env.REDIS_URL ? 'bullmq' : 'cron'}`);
   if (dbMode === 'sqlite') {
     console.log(`Data directory: ${process.env.DATA_DIR || './data'}`);
+  }
+
+  // ─── P0-1: Fail-closed in production ─────────────────────────────────────────
+  if (IS_PRODUCTION) {
+    const apiSecret = process.env.API_SECRET;
+    if (!apiSecret || apiSecret === 'change-me-in-production') {
+      console.error('\n' + '!'.repeat(60));
+      console.error('FATAL: Cannot start in production without a secure API_SECRET.');
+      console.error('Set API_SECRET to a strong random value (32+ chars recommended).');
+      console.error('Example: API_SECRET=$(openssl rand -hex 32)');
+      console.error('!'.repeat(60));
+      process.exit(1);
+    }
+
+    if (!process.env.CORS_ORIGINS) {
+      console.warn('\n[Security] WARNING: CORS_ORIGINS not set in production.');
+      console.warn('[Security] Only same-origin requests will be allowed.');
+      console.warn('[Security] Set CORS_ORIGINS=https://yourdomain.com to allow cross-origin.');
+    }
+
+    if (!process.env.SETUP_TOKEN) {
+      console.warn('\n[Security] WARNING: SETUP_TOKEN not set in production.');
+      console.warn('[Security] Setup endpoints will reject mutation requests.');
+    }
+
+    console.log('\n[Security] Production security checks passed ✓');
+    console.log(`[Security] CORS origins: ${process.env.CORS_ORIGINS || '(same-origin only)'}`);
+    console.log(`[Security] Setup token: ${process.env.SETUP_TOKEN ? 'configured' : 'not set (mutations blocked)'}`);
+    console.log(`[Security] Rate limiting: enabled`);
+  } else {
+    const apiSecret = process.env.API_SECRET;
+    if (!apiSecret || apiSecret === 'change-me-in-production') {
+      console.warn('\n[Security] Dev mode: API_SECRET not set — auth disabled.');
+      console.warn('[Security] Set API_SECRET to enable auth in development.');
+    } else {
+      console.log('\n[Security] Dev mode: API_SECRET configured — auth enforced.');
+    }
   }
 
   // Run migrations on startup
