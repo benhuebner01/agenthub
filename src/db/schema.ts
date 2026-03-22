@@ -285,6 +285,66 @@ export const apiKeys = sqliteTable('api_keys', {
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
 
+// Verifications — post-step validation results
+export const verifications = sqliteTable('verifications', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  planStepId: text('plan_step_id').references(() => planSteps.id, { onDelete: 'cascade' }),
+  runId: text('run_id').references(() => runs.id, { onDelete: 'cascade' }),
+  agentId: text('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  type: text('type').notNull(), // 'schema_check' | 'rule_check' | 'second_pass' | 'human_approval' | 'custom'
+  checkName: text('check_name').notNull(), // e.g. 'no_unverified_claims', 'has_cta', 'format_valid'
+  status: text('status').notNull().default('pending'), // 'pending' | 'passed' | 'failed' | 'skipped' | 'awaiting_approval'
+  input: text('input', { mode: 'json' }), // what was checked
+  result: text('result', { mode: 'json' }), // { passed: boolean, details: string, score?: number }
+  severity: text('severity').notNull().default('error'), // 'error' | 'warning' | 'info'
+  resolvedBy: text('resolved_by'), // 'auto' | 'human' | agent ID
+  notes: text('notes'),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  resolvedAt: text('resolved_at'),
+});
+
+// Workflows — reusable workflow definitions
+export const workflows = sqliteTable('workflows', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  trigger: text('trigger').notNull().default('manual'), // 'manual' | 'schedule' | 'event' | 'goal_activated'
+  status: text('status').notNull().default('draft'), // 'draft' | 'active' | 'paused' | 'archived'
+  steps: text('steps', { mode: 'json' }).$type<WorkflowStepDef[]>(), // serialized step definitions
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
+
+// Workflow step definition type (used in the JSON column)
+export interface WorkflowStepDef {
+  id: string;
+  agentId: string;
+  action: string; // what the agent should do
+  payloadFields?: string[]; // which fields from previous output to pass
+  payloadTransform?: string; // 'full' | 'summary' | 'filtered'
+  onSuccess?: string; // next step id
+  onFailure?: string; // step id or 'abort' | 'retry'
+  maxRetries?: number;
+  timeoutMs?: number;
+  approvalRequired?: boolean;
+}
+
+// Workflow Runs — execution instances of a workflow
+export const workflowRuns = sqliteTable('workflow_runs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+  goalId: text('goal_id').references(() => goals.id, { onDelete: 'set null' }),
+  status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  currentStepId: text('current_step_id'), // which step is active
+  stepResults: text('step_results', { mode: 'json' }).$type<Record<string, any>>(), // stepId -> result
+  input: text('input', { mode: 'json' }),
+  output: text('output', { mode: 'json' }),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+});
+
 // Type exports for settings
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
@@ -388,6 +448,22 @@ export const toolPoliciesRelations = relations(toolPolicies, ({ one }) => ({
   organization: one(organizations, { fields: [toolPolicies.organizationId], references: [organizations.id] }),
 }));
 
+export const verificationsRelations = relations(verifications, ({ one }) => ({
+  planStep: one(planSteps, { fields: [verifications.planStepId], references: [planSteps.id] }),
+  run: one(runs, { fields: [verifications.runId], references: [runs.id] }),
+  agent: one(agents, { fields: [verifications.agentId], references: [agents.id] }),
+}));
+
+export const workflowsRelations = relations(workflows, ({ one, many }) => ({
+  organization: one(organizations, { fields: [workflows.organizationId], references: [organizations.id] }),
+  runs: many(workflowRuns),
+}));
+
+export const workflowRunsRelations = relations(workflowRuns, ({ one }) => ({
+  workflow: one(workflows, { fields: [workflowRuns.workflowId], references: [workflows.id] }),
+  goal: one(goals, { fields: [workflowRuns.goalId], references: [goals.id] }),
+}));
+
 // Type exports
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
@@ -429,3 +505,9 @@ export type PlanStep = typeof planSteps.$inferSelect;
 export type NewPlanStep = typeof planSteps.$inferInsert;
 export type ToolPolicy = typeof toolPolicies.$inferSelect;
 export type NewToolPolicy = typeof toolPolicies.$inferInsert;
+export type Verification = typeof verifications.$inferSelect;
+export type NewVerification = typeof verifications.$inferInsert;
+export type Workflow = typeof workflows.$inferSelect;
+export type NewWorkflow = typeof workflows.$inferInsert;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
+export type NewWorkflowRun = typeof workflowRuns.$inferInsert;

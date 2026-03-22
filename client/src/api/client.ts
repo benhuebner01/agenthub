@@ -888,4 +888,106 @@ export const deleteToolPolicy = (id: string) =>
 export const checkToolPermissionApi = (data: { agentId: string; toolName: string; organizationId?: string; runId?: string }) =>
   api.post<ToolCheckResult>('/tool-policies/check', data).then(r => r.data);
 
+// ─── Verifications ─────────────────────────────────────────────────────────
+export interface Verification {
+  id: string;
+  planStepId: string | null;
+  runId: string | null;
+  agentId: string | null;
+  type: 'schema_check' | 'rule_check' | 'second_pass' | 'human_approval' | 'custom';
+  checkName: string;
+  status: 'pending' | 'passed' | 'failed' | 'skipped' | 'awaiting_approval';
+  input: any;
+  result: any;
+  severity: 'error' | 'warning' | 'info';
+  resolvedBy: string | null;
+  notes: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export const getVerifications = (params?: { stepId?: string; status?: string }) =>
+  api.get<Verification[]>('/verifications', { params }).then(r => r.data);
+
+export const getAvailableChecks = () =>
+  api.get<string[]>('/verifications/checks').then(r => r.data);
+
+export const runVerification = (data: { stepId: string; output: any; checks: string[]; runId?: string; agentId?: string }) =>
+  api.post('/verifications/verify', data).then(r => r.data);
+
+export const requestApproval = (data: { stepId: string; content: any; notes?: string }) =>
+  api.post('/verifications/request-approval', data).then(r => r.data);
+
+export const resolveVerification = (id: string, data: { approved: boolean; notes?: string }) =>
+  api.post(`/verifications/${id}/resolve`, data).then(r => r.data);
+
+export const getPendingApprovals = () =>
+  api.get<Verification[]>('/verifications/pending').then(r => r.data);
+
+// ─── Workflows ─────────────────────────────────────────────────────────────
+
+export interface WorkflowStepDef {
+  id: string;
+  agentId: string;
+  action: string;
+  payloadFields?: string[];
+  payloadTransform?: string;
+  onSuccess?: string;
+  onFailure?: string;
+  maxRetries?: number;
+  timeoutMs?: number;
+  approvalRequired?: boolean;
+}
+
+export interface Workflow {
+  id: string;
+  organizationId: string | null;
+  name: string;
+  description: string | null;
+  trigger: 'manual' | 'schedule' | 'event' | 'goal_activated';
+  status: 'draft' | 'active' | 'paused' | 'archived';
+  steps: WorkflowStepDef[] | null;
+  createdAt: string;
+  updatedAt: string;
+  runs?: WorkflowRun[];
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  goalId: string | null;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  currentStepId: string | null;
+  stepResults: Record<string, any> | null;
+  input: any;
+  output: any;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export const getWorkflows = (params?: { organizationId?: string }) =>
+  api.get<Workflow[]>('/workflows', { params }).then(r => r.data);
+
+export const getWorkflow = (id: string) =>
+  api.get<Workflow & { runs: WorkflowRun[] }>(`/workflows/${id}`).then(r => r.data);
+
+export const createWorkflow = (data: Partial<Workflow>) =>
+  api.post<Workflow>('/workflows', data).then(r => r.data);
+
+export const updateWorkflow = (id: string, data: Partial<Workflow>) =>
+  api.put<Workflow>(`/workflows/${id}`, data).then(r => r.data);
+
+export const deleteWorkflow = (id: string) =>
+  api.delete(`/workflows/${id}`).then(r => r.data);
+
+export const startWorkflowRun = (workflowId: string, data?: { goalId?: string; input?: any }) =>
+  api.post<WorkflowRun>(`/workflows/${workflowId}/run`, data || {}).then(r => r.data);
+
+export const getWorkflowRuns = () =>
+  api.get<WorkflowRun[]>('/workflows/runs/all').then(r => r.data);
+
+export const updateWorkflowRun = (runId: string, data: Partial<WorkflowRun>) =>
+  api.put<WorkflowRun>(`/workflows/runs/${runId}`, data).then(r => r.data);
+
 export default api

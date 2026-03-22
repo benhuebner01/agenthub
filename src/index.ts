@@ -18,6 +18,8 @@ import costsRouter from './routes/costs';
 import settingsRouter from './routes/settings';
 import goalsRouter from './routes/goals';
 import toolPoliciesRouter from './routes/tool-policies';
+import workflowsRouter from './routes/workflows';
+import verificationsRouter from './routes/verifications';
 
 // Services
 import { startScheduler, getSchedulerMode } from './services/scheduler';
@@ -203,6 +205,8 @@ app.use('/api/costs', costsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/tool-policies', toolPoliciesRouter);
+app.use('/api/verifications', verificationsRouter);
+app.use('/api/workflows', workflowsRouter);
 
 // Note: Proposals are served at /api/business/proposals by the business router
 
@@ -502,6 +506,57 @@ async function runMigrations(): Promise<void> {
         );
         CREATE INDEX IF NOT EXISTS idx_tool_policies_tool_name ON tool_policies(tool_name);
         CREATE INDEX IF NOT EXISTS idx_tool_policies_organization_id ON tool_policies(organization_id);
+
+        CREATE TABLE IF NOT EXISTS verifications (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          plan_step_id UUID REFERENCES plan_steps(id) ON DELETE CASCADE,
+          run_id UUID REFERENCES runs(id) ON DELETE CASCADE,
+          agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+          type TEXT NOT NULL,
+          check_name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          input JSONB,
+          result JSONB,
+          severity TEXT NOT NULL DEFAULT 'error',
+          resolved_by TEXT,
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          resolved_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_verifications_plan_step_id ON verifications(plan_step_id);
+        CREATE INDEX IF NOT EXISTS idx_verifications_run_id ON verifications(run_id);
+        CREATE INDEX IF NOT EXISTS idx_verifications_status ON verifications(status);
+
+        CREATE TABLE IF NOT EXISTS workflows (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          description TEXT,
+          trigger TEXT NOT NULL DEFAULT 'manual',
+          status TEXT NOT NULL DEFAULT 'draft',
+          steps JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflows_organization_id ON workflows(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          workflow_id UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+          goal_id UUID REFERENCES goals(id) ON DELETE SET NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          current_step_id TEXT,
+          step_results JSONB,
+          input JSONB,
+          output JSONB,
+          started_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id ON workflow_runs(workflow_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_goal_id ON workflow_runs(goal_id);
       `);
 
       // Add new columns to agents if they don't exist
@@ -771,6 +826,54 @@ async function runMigrations(): Promise<void> {
         );
         CREATE INDEX IF NOT EXISTS idx_tool_policies_tool_name ON tool_policies(tool_name);
         CREATE INDEX IF NOT EXISTS idx_tool_policies_organization_id ON tool_policies(organization_id);
+        CREATE TABLE IF NOT EXISTS verifications (
+          id TEXT PRIMARY KEY,
+          plan_step_id TEXT REFERENCES plan_steps(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          type TEXT NOT NULL,
+          check_name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          input TEXT,
+          result TEXT,
+          severity TEXT NOT NULL DEFAULT 'error',
+          resolved_by TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_verifications_plan_step_id ON verifications(plan_step_id);
+        CREATE INDEX IF NOT EXISTS idx_verifications_run_id ON verifications(run_id);
+        CREATE INDEX IF NOT EXISTS idx_verifications_status ON verifications(status);
+        CREATE TABLE IF NOT EXISTS workflows (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          description TEXT,
+          trigger TEXT NOT NULL DEFAULT 'manual',
+          status TEXT NOT NULL DEFAULT 'draft',
+          steps TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflows_organization_id ON workflows(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+          id TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+          goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          current_step_id TEXT,
+          step_results TEXT,
+          input TEXT,
+          output TEXT,
+          started_at TEXT,
+          completed_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id ON workflow_runs(workflow_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_goal_id ON workflow_runs(goal_id);
       `);
     } catch (migrateErr) {
       console.warn('[DB] Migration warning (tables may already exist):', (migrateErr as Error).message);
