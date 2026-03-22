@@ -7,7 +7,9 @@ import {
   CreateAgentDto,
   AgentType,
   AgentPreset,
+  Organization,
   getPresets,
+  getOrganizations,
   discoverOpenclaw,
   fetchA2ACard,
   getAgentSoulMd,
@@ -2275,6 +2277,13 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
   const [typeConfig, setTypeConfig] = useState<Record<string, unknown>>(agent?.config ?? {})
   const [showPresets, setShowPresets] = useState(false)
   const [showTypePicker, setShowTypePicker] = useState(!agent)
+  const [organizationId, setOrganizationId] = useState<string>(agent?.organizationId ?? '')
+
+  const { data: orgsData } = useQuery({
+    queryKey: ['organizations'],
+    queryFn: getOrganizations,
+  })
+  const orgs = orgsData?.data ?? []
 
   const handlePresetSelect = (preset: AgentPreset) => {
     setType(preset.type as AgentType)
@@ -2322,6 +2331,7 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
       description: description.trim() || undefined,
       type,
       config: typeConfig,
+      organizationId: organizationId || undefined,
     }
     if (agent) {
       updateMutation.mutate(payload)
@@ -2382,6 +2392,26 @@ export default function AgentForm({ agent, onClose }: AgentFormProps) {
             placeholder="What this agent does..."
             className={INPUT_CLASS}
           />
+        </div>
+
+        {/* Organization (optional) */}
+        <div>
+          <label className={LABEL_CLASS}>Organization (optional)</label>
+          <select
+            value={organizationId}
+            onChange={(e) => setOrganizationId(e.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="">Standalone Agent</option>
+            {orgs.map((o: Organization) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-600 mt-1">
+            {organizationId
+              ? 'This agent will be part of the selected organization'
+              : 'This agent runs independently, not tied to any organization'}
+          </p>
         </div>
 
         {/* Type selector section */}

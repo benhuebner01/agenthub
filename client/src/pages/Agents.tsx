@@ -29,6 +29,7 @@ import {
   getAgentRuns,
   getAgentSoulMd,
   Agent,
+  Organization,
 } from '../api/client'
 import { useToast } from '../components/Toaster'
 import StatusBadge from '../components/StatusBadge'
@@ -214,7 +215,10 @@ function AgentRow({
               {orgName}
             </span>
           ) : (
-            <span className="text-xs text-slate-600">—</span>
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded">
+              <Bot className="w-3 h-3" />
+              Standalone
+            </span>
           )}
         </td>
         <td className="px-5 py-3 text-xs text-slate-500">{formatDate(agent.createdAt)}</td>
@@ -396,8 +400,8 @@ export default function Agents() {
   const [filterRole, setFilterRole] = useState<string>('')
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['agents', { organizationId: filterOrgId || undefined, role: filterRole || undefined }],
-    queryFn: () => getAgents({ organizationId: filterOrgId || undefined, role: filterRole || undefined }),
+    queryKey: ['agents', { organizationId: filterOrgId === '__standalone__' ? undefined : (filterOrgId || undefined), role: filterRole || undefined }],
+    queryFn: () => getAgents({ organizationId: filterOrgId === '__standalone__' ? undefined : (filterOrgId || undefined), role: filterRole || undefined }),
     refetchInterval: 30_000,
   })
 
@@ -406,9 +410,14 @@ export default function Agents() {
     queryFn: getOrganizations,
   })
 
-  const agents = data?.data ?? []
+  const allAgents = data?.data ?? []
   const orgs = orgsData?.data ?? []
-  const orgMap = new Map(orgs.map((o) => [o.id, o.name]))
+  const orgMap = new Map(orgs.map((o: Organization) => [o.id, o.name]))
+
+  // Client-side filter for standalone agents
+  const agents = filterOrgId === '__standalone__'
+    ? allAgents.filter((a) => !a.organizationId)
+    : allAgents
 
   return (
     <div className="space-y-5">
@@ -420,18 +429,17 @@ export default function Agents() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {orgs.length > 0 && (
-            <select
-              value={filterOrgId}
-              onChange={(e) => setFilterOrgId(e.target.value)}
-              className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-300"
-            >
-              <option value="">All Organizations</option>
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          )}
+          <select
+            value={filterOrgId}
+            onChange={(e) => setFilterOrgId(e.target.value)}
+            className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-slate-300"
+          >
+            <option value="">All Agents</option>
+            <option value="__standalone__">Standalone Only</option>
+            {orgs.map((o: Organization) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
           <select
             value={filterRole}
             onChange={(e) => setFilterRole(e.target.value)}
@@ -463,17 +471,28 @@ export default function Agents() {
             <p className="text-sm">Failed to load agents. Check your connection.</p>
           </div>
         ) : agents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 text-slate-500">
-            <Bot className="w-10 h-10 mb-3 opacity-40" />
-            <p className="text-sm font-medium">No agents yet</p>
-            <p className="text-xs mt-1">Create your first agent to get started</p>
-            <button
-              onClick={() => setCreateOpen(true)}
-              className="mt-4 flex items-center gap-2 px-4 py-2 bg-accent-purple/20 hover:bg-accent-purple/30 text-accent-purple text-sm rounded-lg border border-accent-purple/30 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Create Agent
-            </button>
+          <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+            <Bot className="w-12 h-12 mb-4 opacity-40" />
+            <p className="text-sm font-medium text-slate-300">No agents yet</p>
+            <p className="text-xs mt-1 mb-6 text-slate-500 max-w-sm text-center">
+              Create a standalone agent for simple tasks, or set up a full AI organization with teams
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="flex items-center gap-2 px-5 py-2.5 bg-accent-purple hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                <Bot className="w-4 h-4" />
+                Single Agent
+              </button>
+              <a
+                href="/business-setup"
+                className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-sm font-medium rounded-lg border border-dark-border transition-colors"
+              >
+                <Building2 className="w-4 h-4" />
+                AI Organization
+              </a>
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
