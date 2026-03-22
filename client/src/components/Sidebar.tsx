@@ -21,6 +21,8 @@ import {
   ChevronDown,
   ChevronRight,
   Wrench,
+  Eye,
+  BarChart3,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { getProposals } from '../api/client'
@@ -41,15 +43,20 @@ const mainNavItems: NavItem[] = [
   { to: '/schedules', icon: Clock, label: 'Schedules' },
 ]
 
-const advancedNavItems: NavItem[] = [
+// Grouped under "Operations" — monitoring & observability
+const operationsItems: NavItem[] = [
+  { to: '/heartbeat', icon: Activity, label: 'Heartbeat' },
+  { to: '/logs', icon: ScrollText, label: 'Logs' },
+  { to: '/costs', icon: TrendingUp, label: 'Costs' },
+  { to: '/budgets', icon: Wallet, label: 'Budgets' },
+]
+
+// Grouped under "Runtime" — goals, policies, workflows, memory
+const runtimeItems: NavItem[] = [
   { to: '/goals', icon: Target, label: 'Goals & Plans' },
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/tool-policies', icon: Shield, label: 'Tool Governance' },
-  { to: '/heartbeat', icon: Activity, label: 'Heartbeat' },
   { to: '/memory', icon: Brain, label: 'Memory' },
-  { to: '/budgets', icon: Wallet, label: 'Budgets' },
-  { to: '/costs', icon: TrendingUp, label: 'Costs' },
-  { to: '/logs', icon: ScrollText, label: 'Logs' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
@@ -78,9 +85,47 @@ function NavItemLink({ item }: { item: NavItem }) {
   )
 }
 
-export default function Sidebar() {
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+function CollapsibleSection({ title, icon: Icon, items, defaultOpen = false }: {
+  title: string
+  icon: any
+  items: NavItem[]
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
 
+  return (
+    <>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors duration-150"
+      >
+        <Icon size={14} className="shrink-0" />
+        <span className="flex-1 text-left">{title}</span>
+        {open ? (
+          <ChevronDown size={14} className="shrink-0" />
+        ) : (
+          <ChevronRight size={14} className="shrink-0" />
+        )}
+      </button>
+      <div
+        className={clsx(
+          'overflow-hidden transition-all duration-300 ease-in-out',
+          open ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'
+        )}
+      >
+        <ul className="space-y-1 mt-1">
+          {items.map((item) => (
+            <li key={item.to}>
+              <NavItemLink item={item} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </>
+  )
+}
+
+export default function Sidebar() {
   const { data: proposalsData } = useQuery({
     queryKey: ['proposals', 'pending'],
     queryFn: () => getProposals('pending'),
@@ -139,34 +184,14 @@ export default function Sidebar() {
         {/* ── Divider ── */}
         <div className="my-4 border-t border-dark-border" />
 
-        {/* ── Advanced Section (collapsible) ── */}
-        <button
-          onClick={() => setAdvancedOpen(!advancedOpen)}
-          className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors duration-150"
-        >
-          <Wrench size={14} className="shrink-0" />
-          <span className="flex-1 text-left">Advanced</span>
-          {advancedOpen ? (
-            <ChevronDown size={14} className="shrink-0" />
-          ) : (
-            <ChevronRight size={14} className="shrink-0" />
-          )}
-        </button>
+        {/* ── Operations (monitoring, costs, logs) ── */}
+        <CollapsibleSection title="Operations" icon={Eye} items={operationsItems} />
 
-        <div
-          className={clsx(
-            'overflow-hidden transition-all duration-300 ease-in-out',
-            advancedOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'
-          )}
-        >
-          <ul className="space-y-1 mt-1">
-            {advancedNavItems.map((item) => (
-              <li key={item.to}>
-                <NavItemLink item={item} />
-              </li>
-            ))}
-          </ul>
-        </div>
+        {/* ── Spacer ── */}
+        <div className="my-2" />
+
+        {/* ── Runtime (goals, workflows, policies, memory) ── */}
+        <CollapsibleSection title="Runtime" icon={Wrench} items={runtimeItems} />
       </nav>
 
       {/* Business Setup quick link */}

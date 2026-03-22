@@ -981,11 +981,32 @@ async function main() {
 
   // Start HTTP server
   const server = app.listen(PORT, '0.0.0.0', () => {
+    // Detect LAN IP for easy access from other devices
+    let lanIp = 'unknown';
+    try {
+      const os = require('os');
+      const nets = os.networkInterfaces();
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name] || []) {
+          if (net.family === 'IPv4' && !net.internal) { lanIp = net.address; break; }
+        }
+        if (lanIp !== 'unknown') break;
+      }
+    } catch {}
+
     console.log('\n' + '='.repeat(60));
-    console.log(`AgentHub running at http://0.0.0.0:${PORT}`);
-    console.log(`   Dashboard: http://localhost:${PORT}`);
-    console.log(`   API:       http://localhost:${PORT}/api`);
-    console.log(`   Health:    http://localhost:${PORT}/api/health`);
+    console.log(`  AgentHub running on port ${PORT}`);
+    console.log(`  Local:   http://localhost:${PORT}`);
+    console.log(`  LAN:     http://${lanIp}:${PORT}`);
+    console.log(`  API:     http://localhost:${PORT}/api`);
+    console.log(`  Health:  http://localhost:${PORT}/api/health`);
+    if (lanIp !== 'unknown') {
+      console.log(`\n  💡 Other devices on your network can access:`);
+      console.log(`     http://${lanIp}:${PORT}`);
+      console.log(`\n  ⚠️  If LAN access fails, check your firewall:`);
+      console.log(`     Windows: Allow Node.js through Windows Firewall`);
+      console.log(`     Linux:   sudo ufw allow ${PORT}`);
+    }
     console.log('='.repeat(60));
   });
 
