@@ -17,6 +17,7 @@ import businessRouter from './routes/business';
 import costsRouter from './routes/costs';
 import settingsRouter from './routes/settings';
 import goalsRouter from './routes/goals';
+import toolPoliciesRouter from './routes/tool-policies';
 
 // Services
 import { startScheduler, getSchedulerMode } from './services/scheduler';
@@ -201,6 +202,7 @@ app.use('/api/business', businessRouter);
 app.use('/api/costs', costsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/goals', goalsRouter);
+app.use('/api/tool-policies', toolPoliciesRouter);
 
 // Note: Proposals are served at /api/business/proposals by the business router
 
@@ -478,6 +480,28 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_plan_steps_goal_id ON plan_steps(goal_id);
         CREATE INDEX IF NOT EXISTS idx_plan_steps_assigned_agent_id ON plan_steps(assigned_agent_id);
         CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
+
+        CREATE TABLE IF NOT EXISTS tool_policies (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          tool_name TEXT NOT NULL,
+          tool_class TEXT,
+          allowed_agent_ids JSONB,
+          denied_agent_ids JSONB,
+          mode TEXT NOT NULL DEFAULT 'execute',
+          approval_required BOOLEAN NOT NULL DEFAULT false,
+          max_calls_per_run INTEGER,
+          max_calls_per_day INTEGER,
+          max_cost_per_call_usd NUMERIC(10,4),
+          required_conditions JSONB,
+          forbidden_conditions JSONB,
+          postconditions JSONB,
+          enabled BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_tool_policies_tool_name ON tool_policies(tool_name);
+        CREATE INDEX IF NOT EXISTS idx_tool_policies_organization_id ON tool_policies(organization_id);
       `);
 
       // Add new columns to agents if they don't exist
@@ -726,6 +750,27 @@ async function runMigrations(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_plan_steps_goal_id ON plan_steps(goal_id);
         CREATE INDEX IF NOT EXISTS idx_plan_steps_assigned_agent_id ON plan_steps(assigned_agent_id);
         CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
+        CREATE TABLE IF NOT EXISTS tool_policies (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+          tool_name TEXT NOT NULL,
+          tool_class TEXT,
+          allowed_agent_ids TEXT,
+          denied_agent_ids TEXT,
+          mode TEXT NOT NULL DEFAULT 'execute',
+          approval_required INTEGER NOT NULL DEFAULT 0,
+          max_calls_per_run INTEGER,
+          max_calls_per_day INTEGER,
+          max_cost_per_call_usd REAL,
+          required_conditions TEXT,
+          forbidden_conditions TEXT,
+          postconditions TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tool_policies_tool_name ON tool_policies(tool_name);
+        CREATE INDEX IF NOT EXISTS idx_tool_policies_organization_id ON tool_policies(organization_id);
       `);
     } catch (migrateErr) {
       console.warn('[DB] Migration warning (tables may already exist):', (migrateErr as Error).message);

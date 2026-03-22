@@ -17,6 +17,7 @@ import SettingsPage from './pages/Settings'
 import Heartbeat from './pages/Heartbeat'
 import Memory from './pages/Memory'
 import Goals from './pages/Goals'
+import ToolPolicies from './pages/ToolPolicies'
 import { getSetupStatus } from './api/client'
 
 function AppRoutes() {
@@ -73,6 +74,7 @@ function AppRoutes() {
                 <Route path="/heartbeat" element={<Heartbeat />} />
                 <Route path="/memory" element={<Memory />} />
                 <Route path="/goals" element={<Goals />} />
+                <Route path="/tool-policies" element={<ToolPolicies />} />
                 <Route path="/proposals" element={<Navigate to="/organization" replace />} />
               </Routes>
             </Layout>

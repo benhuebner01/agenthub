@@ -840,4 +840,52 @@ export const activateGoal = (id: string) =>
 export const advanceGoal = (id: string) =>
   api.post(`/goals/${id}/advance`).then(r => r.data);
 
+// ─── Tool Policies ─────────────────────────────────────────────────────────
+
+export interface ToolPolicy {
+  id: string;
+  organizationId: string | null;
+  toolName: string;
+  toolClass: string | null;
+  allowedAgentIds: string[] | null;
+  deniedAgentIds: string[] | null;
+  mode: 'read_only' | 'draft_only' | 'execute' | 'execute_with_approval' | 'sandbox_only';
+  approvalRequired: boolean;
+  maxCallsPerRun: number | null;
+  maxCallsPerDay: number | null;
+  maxCostPerCallUsd: number | null;
+  requiredConditions: string[] | null;
+  forbiddenConditions: string[] | null;
+  postconditions: string[] | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolCheckResult {
+  allowed: boolean;
+  mode: string;
+  approvalRequired: boolean;
+  reason?: string;
+  policyId?: string;
+}
+
+export const getToolPolicies = (params?: { organizationId?: string }) =>
+  api.get<ToolPolicy[]>('/tool-policies', { params }).then(r => r.data);
+
+export const getToolPolicy = (id: string) =>
+  api.get<ToolPolicy>(`/tool-policies/${id}`).then(r => r.data);
+
+export const createToolPolicy = (data: Partial<ToolPolicy>) =>
+  api.post<ToolPolicy>('/tool-policies', data).then(r => r.data);
+
+export const updateToolPolicy = (id: string, data: Partial<ToolPolicy>) =>
+  api.put<ToolPolicy>(`/tool-policies/${id}`, data).then(r => r.data);
+
+export const deleteToolPolicy = (id: string) =>
+  api.delete(`/tool-policies/${id}`).then(r => r.data);
+
+export const checkToolPermissionApi = (data: { agentId: string; toolName: string; organizationId?: string; runId?: string }) =>
+  api.post<ToolCheckResult>('/tool-policies/check', data).then(r => r.data);
+
 export default api

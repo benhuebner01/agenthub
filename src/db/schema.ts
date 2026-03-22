@@ -252,6 +252,27 @@ export const planSteps = sqliteTable('plan_steps', {
   updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
 });
 
+// Tool Policies — governance rules for tool usage per agent/org
+export const toolPolicies = sqliteTable('tool_policies', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  toolName: text('tool_name').notNull(), // e.g. 'web_search', 'gmail', 'filesystem', 'code_exec'
+  toolClass: text('tool_class'), // 'research' | 'generation' | 'execution' | 'communication' | 'filesystem'
+  allowedAgentIds: text('allowed_agent_ids', { mode: 'json' }).$type<string[]>(), // null = all agents
+  deniedAgentIds: text('denied_agent_ids', { mode: 'json' }).$type<string[]>(),
+  mode: text('mode').notNull().default('execute'), // 'read_only' | 'draft_only' | 'execute' | 'execute_with_approval' | 'sandbox_only'
+  approvalRequired: integer('approval_required', { mode: 'boolean' }).notNull().default(false),
+  maxCallsPerRun: integer('max_calls_per_run'),
+  maxCallsPerDay: integer('max_calls_per_day'),
+  maxCostPerCallUsd: real('max_cost_per_call_usd'),
+  requiredConditions: text('required_conditions', { mode: 'json' }).$type<string[]>(), // conditions under which this tool must be used
+  forbiddenConditions: text('forbidden_conditions', { mode: 'json' }).$type<string[]>(), // conditions under which tool is blocked
+  postconditions: text('postconditions', { mode: 'json' }).$type<string[]>(), // what must be true after tool use
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
+
 // API Keys — encrypted storage for provider keys (managed via UI)
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -363,6 +384,10 @@ export const planStepsRelations = relations(planSteps, ({ one }) => ({
   run: one(runs, { fields: [planSteps.runId], references: [runs.id] }),
 }));
 
+export const toolPoliciesRelations = relations(toolPolicies, ({ one }) => ({
+  organization: one(organizations, { fields: [toolPolicies.organizationId], references: [organizations.id] }),
+}));
+
 // Type exports
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
@@ -402,3 +427,5 @@ export type Goal = typeof goals.$inferSelect;
 export type NewGoal = typeof goals.$inferInsert;
 export type PlanStep = typeof planSteps.$inferSelect;
 export type NewPlanStep = typeof planSteps.$inferInsert;
+export type ToolPolicy = typeof toolPolicies.$inferSelect;
+export type NewToolPolicy = typeof toolPolicies.$inferInsert;
