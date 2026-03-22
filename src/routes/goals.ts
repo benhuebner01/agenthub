@@ -32,7 +32,7 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const [goal] = await db.select().from(goals).where(eq(goals.id, req.params.id));
-    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    if (!goal) { res.status(404).json({ error: 'Goal not found' }); return; }
 
     const steps = await db.select().from(planSteps)
       .where(eq(planSteps.goalId, req.params.id))
@@ -48,7 +48,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { title, description, priority, organizationId, agentId, successCriteria, constraints, deadline, measurableTarget } = req.body;
-    if (!title) return res.status(400).json({ error: 'Title is required' });
+    if (!title) { res.status(400).json({ error: 'Title is required' }); return; }
 
     const id = uuidv4();
     const now = new Date().toISOString();
@@ -90,7 +90,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       .where(eq(goals.id, req.params.id))
       .returning();
 
-    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    if (!goal) { res.status(404).json({ error: 'Goal not found' }); return; }
     res.json(goal);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -102,7 +102,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     await db.delete(planSteps).where(eq(planSteps.goalId, req.params.id));
     const [goal] = await db.delete(goals).where(eq(goals.id, req.params.id)).returning();
-    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    if (!goal) { res.status(404).json({ error: 'Goal not found' }); return; }
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -115,7 +115,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.post('/:id/steps', async (req: Request, res: Response) => {
   try {
     const { title, description, type, assignedAgentId, dependsOn, verification, order } = req.body;
-    if (!title) return res.status(400).json({ error: 'Step title is required' });
+    if (!title) { res.status(400).json({ error: 'Step title is required' }); return; }
 
     // Auto-calculate order if not provided
     let stepOrder = order;
@@ -166,7 +166,7 @@ router.put('/:goalId/steps/:stepId', async (req: Request, res: Response) => {
       .where(and(eq(planSteps.id, req.params.stepId), eq(planSteps.goalId, req.params.goalId)))
       .returning();
 
-    if (!step) return res.status(404).json({ error: 'Step not found' });
+    if (!step) { res.status(404).json({ error: 'Step not found' }); return; }
 
     // Recalculate goal progress
     const allSteps = await db.select().from(planSteps).where(eq(planSteps.goalId, req.params.goalId));
@@ -188,7 +188,7 @@ router.delete('/:goalId/steps/:stepId', async (req: Request, res: Response) => {
     const [step] = await db.delete(planSteps)
       .where(and(eq(planSteps.id, req.params.stepId), eq(planSteps.goalId, req.params.goalId)))
       .returning();
-    if (!step) return res.status(404).json({ error: 'Step not found' });
+    if (!step) { res.status(404).json({ error: 'Step not found' }); return; }
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -200,7 +200,7 @@ router.post('/:id/activate', async (req: Request, res: Response) => {
   try {
     const now = new Date().toISOString();
     const [goal] = await db.select().from(goals).where(eq(goals.id, req.params.id));
-    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    if (!goal) { res.status(404).json({ error: 'Goal not found' }); return; }
 
     // Mark goal as active
     await db.update(goals).set({ status: 'active', updatedAt: now }).where(eq(goals.id, req.params.id));

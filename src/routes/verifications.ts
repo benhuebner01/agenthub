@@ -12,11 +12,11 @@ router.get('/', async (req: Request, res: Response) => {
     const { stepId, runId, status } = req.query;
     if (stepId) {
       const results = await getStepVerifications(stepId as string);
-      return res.json(results);
+      res.json(results); return;
     }
     if (status === 'awaiting_approval') {
       const results = await getPendingApprovals();
-      return res.json(results);
+      res.json(results); return;
     }
     const all = await db.select().from(verifications);
     res.json(all);
@@ -35,7 +35,7 @@ router.post('/verify', async (req: Request, res: Response) => {
   try {
     const { stepId, output, checks, runId, agentId } = req.body;
     if (!stepId || !checks || !Array.isArray(checks)) {
-      return res.status(400).json({ error: 'stepId and checks[] required' });
+      res.status(400).json({ error: 'stepId and checks[] required' }); return;
     }
     const result = await verifyStepOutput(stepId, output, checks, { runId, agentId });
     res.json(result);
@@ -48,7 +48,7 @@ router.post('/verify', async (req: Request, res: Response) => {
 router.post('/request-approval', async (req: Request, res: Response) => {
   try {
     const { stepId, content, runId, agentId, notes } = req.body;
-    if (!stepId) return res.status(400).json({ error: 'stepId required' });
+    if (!stepId) { res.status(400).json({ error: 'stepId required' }); return; }
     const v = await requestHumanApproval(stepId, content, { runId, agentId, notes });
     res.json(v);
   } catch (e: any) {
@@ -60,9 +60,9 @@ router.post('/request-approval', async (req: Request, res: Response) => {
 router.post('/:id/resolve', async (req: Request, res: Response) => {
   try {
     const { approved, notes } = req.body;
-    if (approved === undefined) return res.status(400).json({ error: 'approved (boolean) required' });
+    if (approved === undefined) { res.status(400).json({ error: 'approved (boolean) required' }); return; }
     const v = await resolveApproval(req.params.id, approved, notes);
-    if (!v) return res.status(404).json({ error: 'Verification not found' });
+    if (!v) { res.status(404).json({ error: 'Verification not found' }); return; }
     res.json(v);
   } catch (e: any) {
     res.status(500).json({ error: e.message });

@@ -303,19 +303,6 @@ export const verifications = sqliteTable('verifications', {
   resolvedAt: text('resolved_at'),
 });
 
-// Workflows — reusable workflow definitions
-export const workflows = sqliteTable('workflows', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  description: text('description'),
-  trigger: text('trigger').notNull().default('manual'), // 'manual' | 'schedule' | 'event' | 'goal_activated'
-  status: text('status').notNull().default('draft'), // 'draft' | 'active' | 'paused' | 'archived'
-  steps: text('steps', { mode: 'json' }).$type<WorkflowStepDef[]>(), // serialized step definitions
-  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
-  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
-});
-
 // Workflow step definition type (used in the JSON column)
 export interface WorkflowStepDef {
   id: string;
@@ -329,6 +316,19 @@ export interface WorkflowStepDef {
   timeoutMs?: number;
   approvalRequired?: boolean;
 }
+
+// Workflows — reusable workflow definitions
+export const workflows = sqliteTable('workflows', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  trigger: text('trigger').notNull().default('manual'), // 'manual' | 'schedule' | 'event' | 'goal_activated'
+  status: text('status').notNull().default('draft'), // 'draft' | 'active' | 'paused' | 'archived'
+  steps: text('steps', { mode: 'json' }).$type<WorkflowStepDef[]>(), // serialized step definitions
+  createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString()),
+});
 
 // Workflow Runs — execution instances of a workflow
 export const workflowRuns = sqliteTable('workflow_runs', {

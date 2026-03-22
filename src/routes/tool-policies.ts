@@ -22,7 +22,7 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const [policy] = await db.select().from(toolPolicies).where(eq(toolPolicies.id, req.params.id));
-    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+    if (!policy) { res.status(404).json({ error: 'Policy not found' }); return; }
     res.json(policy);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -53,7 +53,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     delete updates.id;
     delete updates.createdAt;
     const [policy] = await db.update(toolPolicies).set(updates).where(eq(toolPolicies.id, req.params.id)).returning();
-    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+    if (!policy) { res.status(404).json({ error: 'Policy not found' }); return; }
     res.json(policy);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -64,7 +64,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const [policy] = await db.delete(toolPolicies).where(eq(toolPolicies.id, req.params.id)).returning();
-    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+    if (!policy) { res.status(404).json({ error: 'Policy not found' }); return; }
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -75,7 +75,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.post('/check', async (req: Request, res: Response) => {
   try {
     const { agentId, toolName, organizationId, runId, estimatedCostUsd } = req.body;
-    if (!agentId || !toolName) return res.status(400).json({ error: 'agentId and toolName required' });
+    if (!agentId || !toolName) { res.status(400).json({ error: 'agentId and toolName required' }); return; }
     const result = await checkToolPermission({ agentId, toolName, organizationId, runId, estimatedCostUsd });
     res.json(result);
   } catch (e: any) {
