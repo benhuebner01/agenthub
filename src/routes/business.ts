@@ -387,10 +387,11 @@ router.get('/organizations/:id/chart', async (req: Request, res: Response) => {
     const orgAgents = await db.select().from(agents).where(eq(agents.organizationId, req.params.id));
 
     // Build tree structure
+    type OrgAgent = typeof orgAgents[number];
     function buildTree(agentId: string | null): any[] {
       return orgAgents
-        .filter((a) => a.parentAgentId === agentId)
-        .map((a) => ({
+        .filter((a: OrgAgent) => a.parentAgentId === agentId)
+        .map((a: OrgAgent) => ({
           id: a.id,
           name: a.name,
           role: a.role,
@@ -403,8 +404,8 @@ router.get('/organizations/:id/chart', async (req: Request, res: Response) => {
     }
 
     // Find CEO(s) — agents with role 'ceo' or no parent
-    const ceos = orgAgents.filter((a) => a.role === 'ceo' || (!a.parentAgentId && a.role !== 'ceo'));
-    const chart = ceos.map((a) => ({
+    const ceos = orgAgents.filter((a: OrgAgent) => a.role === 'ceo' || (!a.parentAgentId && a.role !== 'ceo'));
+    const chart = ceos.map((a: OrgAgent) => ({
       id: a.id,
       name: a.name,
       role: a.role,
@@ -436,14 +437,15 @@ router.post('/organizations/:id/ceo-run', async (req: Request, res: Response) =>
     }
 
     const orgAgents = await db.select().from(agents).where(eq(agents.organizationId, orgId));
-    const ceoAgent = orgAgents.find((a) => a.role === 'ceo');
+    type OrgAgent = typeof orgAgents[number];
+    const ceoAgent = orgAgents.find((a: OrgAgent) => a.role === 'ceo');
 
     if (!ceoAgent) {
       res.status(404).json({ error: 'No CEO agent found for this organization' });
       return;
     }
 
-    const teamAgents = orgAgents.filter((a) => a.role !== 'ceo');
+    const teamAgents = orgAgents.filter((a: OrgAgent) => a.role !== 'ceo');
 
     // Gather stats for last 30 days
     const thirtyDaysAgo = new Date();
@@ -453,15 +455,16 @@ router.post('/organizations/:id/ceo-run', async (req: Request, res: Response) =>
     const recentRuns = await db.select().from(runs)
       .where(gte(runs.createdAt, cutoffDate));
 
-    const orgRunAgentIds = new Set(orgAgents.map((a) => a.id));
-    const orgRuns = recentRuns.filter((r) => orgRunAgentIds.has(r.agentId));
+    type RunRow = typeof recentRuns[number];
+    const orgRunAgentIds = new Set(orgAgents.map((a: OrgAgent) => a.id));
+    const orgRuns = recentRuns.filter((r: RunRow) => orgRunAgentIds.has(r.agentId));
     const totalRuns = orgRuns.length;
-    const successRuns = orgRuns.filter((r) => r.status === 'success').length;
+    const successRuns = orgRuns.filter((r: RunRow) => r.status === 'success').length;
     const successRate = totalRuns > 0 ? Math.round((successRuns / totalRuns) * 100) : 0;
-    const totalCost = orgRuns.reduce((sum, r) => sum + (Number(r.costUsd) || 0), 0);
+    const totalCost = orgRuns.reduce((sum: number, r: RunRow) => sum + (Number(r.costUsd) || 0), 0);
 
     const goalsStr = Array.isArray(org.goals) ? (org.goals as string[]).join(', ') : String(org.goals || '');
-    const teamStr = teamAgents.map((a) => `- ${a.name} (${a.role}): ${a.jobDescription || a.description || 'No description'}`).join('\n');
+    const teamStr = teamAgents.map((a: OrgAgent) => `- ${a.name} (${a.role}): ${a.jobDescription || a.description || 'No description'}`).join('\n');
 
     // Build CEO system prompt with full organizational context
     const ceoSystemPrompt = `You are the CEO of ${org.name}. Your mission: ${goalsStr}.
@@ -492,7 +495,7 @@ The system prompt content here...
 Analyze the situation and respond to: ${userInput || 'Please analyze our current organizational performance and recommend improvements.'}`;
 
     // Check if this is the first CEO run (no previous runs for this CEO)
-    const ceoRunCount = orgRuns.filter((r) => r.agentId === ceoAgent.id).length;
+    const ceoRunCount = orgRuns.filter((r: RunRow) => r.agentId === ceoAgent.id).length;
     const isFirstRun = ceoRunCount === 0;
 
     // On first run, ask CEO to also generate system prompts for all agents
@@ -538,7 +541,7 @@ Analyze the situation and respond to: ${userInput || 'Please analyze our current
     while ((sysMatch = sysPromptRegex.exec(ceoOutput)) !== null) {
       const agentName = sysMatch[1].trim();
       const sysPromptContent = sysMatch[2].trim();
-      const targetAgent = orgAgents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
+      const targetAgent = orgAgents.find((a: OrgAgent) => a.name.toLowerCase() === agentName.toLowerCase());
       if (targetAgent) {
         const updatedConfig = { ...(targetAgent.config as Record<string, unknown>), systemPrompt: sysPromptContent };
         await db.update(agents)

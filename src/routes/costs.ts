@@ -39,7 +39,7 @@ router.get('/summary', async (req: Request, res: Response) => {
     }).from(runs).orderBy(desc(runs.createdAt));
 
     const allAgents = await db.select({ id: agents.id, name: agents.name }).from(agents);
-    const agentMap = new Map(allAgents.map((a) => [a.id, a.name]));
+    const agentMap = new Map<string, string>(allAgents.map((a: { id: string; name: string }) => [a.id, a.name]));
 
     let totalThisMonth = 0;
     let totalThisWeek = 0;
@@ -126,7 +126,7 @@ router.get('/by-agent', async (req: Request, res: Response) => {
     }).from(runs).where(gte(runs.createdAt, cutoffStr));
 
     const allAgents = await db.select({ id: agents.id, name: agents.name, type: agents.type }).from(agents);
-    const agentMap = new Map(allAgents.map((a) => [a.id, a]));
+    const agentMap = new Map<string, { id: string; name: string; type: string }>(allAgents.map((a: { id: string; name: string; type: string }) => [a.id, a]));
 
     const agentStats = new Map<string, { agentId: string; name: string; type: string; cost: number; runs: number; tokens: number }>();
 
@@ -170,8 +170,8 @@ router.get('/by-organization', async (req: Request, res: Response) => {
     const allOrgs = await db.select().from(organizations);
     const allRuns = await db.select({ agentId: runs.agentId, costUsd: runs.costUsd, tokensUsed: runs.tokensUsed }).from(runs);
 
-    const orgMap = new Map(allOrgs.map((o) => [o.id, o]));
-    const agentToOrg = new Map(allAgents.filter((a) => a.organizationId).map((a) => [a.id, a.organizationId!]));
+    const orgMap = new Map<string, typeof allOrgs[number]>(allOrgs.map((o: typeof allOrgs[number]) => [o.id, o]));
+    const agentToOrg = new Map<string, string>(allAgents.filter((a: typeof allAgents[number]) => a.organizationId).map((a: typeof allAgents[number]) => [a.id, a.organizationId!]));
 
     const orgCostMap = new Map<string, { orgId: string; name: string; cost: number; agents: number }>();
 
@@ -186,7 +186,7 @@ router.get('/by-organization', async (req: Request, res: Response) => {
           orgId: oId,
           name: org?.name || oId,
           cost: 0,
-          agents: new Set(allAgents.filter((a) => a.organizationId === oId).map((a) => a.id)).size,
+          agents: new Set(allAgents.filter((a: typeof allAgents[number]) => a.organizationId === oId).map((a: typeof allAgents[number]) => a.id)).size,
         });
       }
       orgCostMap.get(oId)!.cost += Number(run.costUsd) || 0;
@@ -274,7 +274,7 @@ router.get('/projections', async (req: Request, res: Response) => {
     }).from(runs).where(gte(runs.createdAt, cutoffStr));
 
     const allAgents = await db.select({ id: agents.id, name: agents.name }).from(agents);
-    const agentMap = new Map(allAgents.map((a) => [a.id, a]));
+    const agentMap = new Map<string, { id: string; name: string }>(allAgents.map((a: { id: string; name: string }) => [a.id, a]));
 
     const agentCostMap = new Map<string, { agentId: string; name: string; last30DayCost: number }>();
 

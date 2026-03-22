@@ -157,7 +157,7 @@ async function startBullMQScheduler(): Promise<void> {
   const redisUrl = process.env.REDIS_URL!;
   const connection = new IORedis(redisUrl, { maxRetriesPerRequest: null });
 
-  bullQueue = new Queue('agenthub-schedules', { connection });
+  bullQueue = new Queue('agenthub-schedules', { connection: connection as any });
   bullSchedulerMap = new Map();
 
   bullWorker = new Worker(
@@ -166,7 +166,7 @@ async function startBullMQScheduler(): Promise<void> {
       const { scheduleId, agentId } = job.data as { scheduleId: string; agentId: string };
       await runScheduledJob(scheduleId, agentId);
     },
-    { connection }
+    { connection: connection as any }
   );
 
   bullWorker.on('failed', (job: any, err: Error) => {

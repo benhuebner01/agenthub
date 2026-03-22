@@ -7,6 +7,9 @@ import { checkBudget, recordSpend } from './budget';
 import { scheduleAgent, removeSchedule } from './scheduler';
 import { v4 as uuidv4 } from 'uuid';
 
+type AgentRow = typeof agents.$inferSelect;
+type RunRow = typeof runs.$inferSelect;
+
 let bot: Bot | null = null;
 let authorizedUserIds: Set<number> = new Set();
 
@@ -94,7 +97,7 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
 async function runAgentWithFeedback(ctx: Context, agentRef: string, inputText: string): Promise<void> {
   const allAgents = await db.select().from(agents);
   const agent = allAgents.find(
-    (a) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
+    (a: AgentRow) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
   );
 
   if (!agent) {
@@ -247,7 +250,7 @@ export async function startTelegramBot(): Promise<void> {
 
     if (!subCmd || subCmd === 'list') {
       const allAgents = await db.select().from(agents).where(eq(agents.status, 'active'));
-      const lines = allAgents.map((a) => `• *${a.name}* (${a.type}) - ID: \`${a.id}\``);
+      const lines = allAgents.map((a: AgentRow) => `• *${a.name}* (${a.type}) - ID: \`${a.id}\``);
       await ctx.reply(
         `🤖 *Available agents:*\n\n${lines.join('\n')}\n\nUse: /route set <agent_name_or_id>`,
         { parse_mode: 'Markdown' }
@@ -264,7 +267,7 @@ export async function startTelegramBot(): Promise<void> {
 
       const allAgents = await db.select().from(agents);
       const agent = allAgents.find(
-        (a) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
+        (a: AgentRow) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
       );
 
       if (!agent) {
@@ -337,7 +340,7 @@ export async function startTelegramBot(): Promise<void> {
 
     const allAgents = await db.select().from(agents);
     const agent = allAgents.find(
-      (a) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
+      (a: AgentRow) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
     );
 
     if (!agent) {
@@ -368,7 +371,7 @@ export async function startTelegramBot(): Promise<void> {
     }
 
     const lines = allAgents.map(
-      (a) => `• *${a.name}* (${a.type}) [${a.role || 'worker'}]\n  ${formatStatus(a.status)}`
+      (a: AgentRow) => `• *${a.name}* (${a.type}) [${a.role || 'worker'}]\n  ${formatStatus(a.status)}`
     );
 
     await ctx.reply(
@@ -403,7 +406,7 @@ export async function startTelegramBot(): Promise<void> {
     if (agentRef) {
       const allAgents = await db.select().from(agents);
       const agent = allAgents.find(
-        (a) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
+        (a: AgentRow) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
       );
 
       if (!agent) {
@@ -419,7 +422,7 @@ export async function startTelegramBot(): Promise<void> {
         .limit(5);
 
       const runLines = recentRuns.map(
-        (r) => `• ${formatStatus(r.status)} - ${r.triggeredBy} - ${formatDuration(r.startedAt, r.completedAt)}`
+        (r: RunRow) => `• ${formatStatus(r.status)} - ${r.triggeredBy} - ${formatDuration(r.startedAt, r.completedAt)}`
       );
 
       await ctx.reply(
@@ -428,7 +431,7 @@ export async function startTelegramBot(): Promise<void> {
       );
     } else {
       const allAgents = await db.select().from(agents);
-      const lines = allAgents.map((a) => `• *${a.name}*: ${formatStatus(a.status)}`);
+      const lines = allAgents.map((a: AgentRow) => `• *${a.name}*: ${formatStatus(a.status)}`);
       await ctx.reply(
         `*Agent Status*\n\n${lines.join('\n') || 'No agents found'}`,
         { parse_mode: 'Markdown' }
@@ -453,9 +456,10 @@ export async function startTelegramBot(): Promise<void> {
       .from(budgets)
       .innerJoin(agents, eq(budgets.agentId, agents.id));
 
+    type BudgetJoinRow = typeof allBudgets[number];
     const filteredBudgets = agentRef
       ? allBudgets.filter(
-          (b) => b.agentId === agentRef || b.agentName.toLowerCase() === agentRef.toLowerCase()
+          (b: BudgetJoinRow) => b.agentId === agentRef || b.agentName.toLowerCase() === agentRef.toLowerCase()
         )
       : allBudgets;
 
@@ -464,7 +468,7 @@ export async function startTelegramBot(): Promise<void> {
       return;
     }
 
-    const lines = filteredBudgets.map((b) => {
+    const lines = filteredBudgets.map((b: BudgetJoinRow) => {
       const limit = b.limitUsd as number;
       const spend = b.currentSpend as number;
       const pct = limit > 0 ? ((spend / limit) * 100).toFixed(1) : '0';
@@ -520,8 +524,9 @@ export async function startTelegramBot(): Promise<void> {
       return;
     }
 
+    type RunJoinRow = typeof recentRuns[number];
     const lines = recentRuns.map(
-      (r) =>
+      (r: RunJoinRow) =>
         `${formatStatus(r.status)} *${r.agentName}*\n  ${r.triggeredBy} | ${formatDuration(r.startedAt, r.completedAt)} | $${(r.costUsd as number).toFixed(4)}`
     );
 
@@ -537,7 +542,7 @@ export async function startTelegramBot(): Promise<void> {
 
     const allAgents = await db.select().from(agents);
     const agent = allAgents.find(
-      (a) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
+      (a: AgentRow) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
     );
 
     if (!agent) { await ctx.reply(`❌ Agent "${agentRef}" not found`); return; }
@@ -561,7 +566,7 @@ export async function startTelegramBot(): Promise<void> {
 
     const allAgents = await db.select().from(agents);
     const agent = allAgents.find(
-      (a) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
+      (a: AgentRow) => a.id === agentRef || a.name.toLowerCase() === agentRef.toLowerCase()
     );
 
     if (!agent) { await ctx.reply(`❌ Agent "${agentRef}" not found`); return; }

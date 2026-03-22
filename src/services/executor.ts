@@ -77,7 +77,7 @@ async function loadAgentMemoryContext(agentId: string): Promise<string> {
   try {
     const memories = await db.select().from(agentMemory).where(eq(agentMemory.agentId, agentId));
     if (memories.length === 0) return '';
-    return '\n\nYour persistent memory:\n' + memories.map(m => `${m.key}: ${m.value}`).join('\n');
+    return '\n\nYour persistent memory:\n' + memories.map((m: typeof memories[number]) => `${m.key}: ${m.value}`).join('\n');
   } catch {
     return '';
   }
@@ -88,7 +88,7 @@ async function loadSharedMemoryContext(organizationId: string | null | undefined
   try {
     const memories = await db.select().from(sharedMemory).where(eq(sharedMemory.organizationId, organizationId));
     if (memories.length === 0) return '';
-    return '\n\nShared organization memory:\n' + memories.map(m => `${m.key}: ${m.value}`).join('\n');
+    return '\n\nShared organization memory:\n' + memories.map((m: typeof memories[number]) => `${m.key}: ${m.value}`).join('\n');
   } catch {
     return '';
   }

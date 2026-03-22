@@ -134,19 +134,20 @@ router.get('/', async (req: Request, res: Response) => {
     const role = req.query.role as string | undefined;
 
     let allAgents = await db.select().from(agents).orderBy(agents.createdAt);
+    type Agent = typeof allAgents[number];
 
     if (organizationId) {
-      allAgents = allAgents.filter((a) => a.organizationId === organizationId);
+      allAgents = allAgents.filter((a: Agent) => a.organizationId === organizationId);
     }
     if (role) {
-      allAgents = allAgents.filter((a) => a.role === role);
+      allAgents = allAgents.filter((a: Agent) => a.role === role);
     }
 
     // Enrich with parent name and children count
-    const agentMap = new Map(allAgents.map((a) => [a.id, a]));
-    const enriched = allAgents.map((a) => {
+    const agentMap = new Map<string, Agent>(allAgents.map((a: Agent) => [a.id, a]));
+    const enriched = allAgents.map((a: Agent) => {
       const parentAgent = a.parentAgentId ? agentMap.get(a.parentAgentId) : null;
-      const childrenCount = allAgents.filter((c) => c.parentAgentId === a.id).length;
+      const childrenCount = allAgents.filter((c: Agent) => c.parentAgentId === a.id).length;
       return {
         ...a,
         parentAgentName: parentAgent?.name || null,

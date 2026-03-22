@@ -121,7 +121,7 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const allSettings = await db.select().from(settings);
     // Filter out sensitive values
-    const publicSettings = allSettings.filter((s) => !s.key.includes('key') && !s.key.includes('token'));
+    const publicSettings = allSettings.filter((s: typeof allSettings[number]) => !s.key.includes('key') && !s.key.includes('token'));
     res.json({ data: publicSettings });
   } catch (err: any) {
     console.error('[Settings] GET / error:', err);
