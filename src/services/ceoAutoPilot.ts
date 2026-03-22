@@ -38,9 +38,9 @@ async function buildCeoContext(orgId: string, ceoAgent: any): Promise<string> {
   const goalSummaries: string[] = [];
   for (const goal of activeGoals.slice(0, 10)) {
     const steps = await db.select().from(planSteps).where(eq(planSteps.goalId, goal.id));
-    const readyCount = steps.filter(s => s.status === 'ready').length;
-    const completedCount = steps.filter(s => s.status === 'completed' || s.status === 'verified').length;
-    const failedCount = steps.filter(s => s.status === 'failed').length;
+    const readyCount = steps.filter((s: any) => s.status === 'ready').length;
+    const completedCount = steps.filter((s: any) => s.status === 'completed' || s.status === 'verified').length;
+    const failedCount = steps.filter((s: any) => s.status === 'failed').length;
     goalSummaries.push(
       `- "${goal.title}" [${goal.status}] — ${goal.progress}% done, ${completedCount}/${steps.length} steps completed` +
       (readyCount > 0 ? `, ${readyCount} ready to execute` : '') +
@@ -54,7 +54,7 @@ async function buildCeoContext(orgId: string, ceoAgent: any): Promise<string> {
   const recentRuns = await db.select().from(runs)
     .where(eq(runs.status, 'success'))
     .orderBy(desc(runs.createdAt));
-  const runsSince = recentRuns.filter(r => r.createdAt && r.createdAt > oneDayAgo);
+  const runsSince = recentRuns.filter((r: any) => r.createdAt && r.createdAt > oneDayAgo);
 
   // Get pending proposals
   const pendingProposals = await db.select().from(proposals)
@@ -73,27 +73,27 @@ async function buildCeoContext(orgId: string, ceoAgent: any): Promise<string> {
 
 ## Organization
 - Industry: ${org.industry || 'General'}
-- Team: ${orgAgents.length} agents (${orgAgents.filter(a => a.status === 'active').length} active)
+- Team: ${orgAgents.length} agents (${orgAgents.filter((a: any) => a.status === 'active').length} active)
 - Launch State: ${org.launchState}
 
 ## Organization Goals
 ${orgGoalsStr}
 
 ## Team
-${orgAgents.map(a => `- ${a.name} (${a.role}, ${a.type}) — ${a.status}`).join('\n')}
+${orgAgents.map((a: any) => `- ${a.name} (${a.role}, ${a.type}) — ${a.status}`).join('\n')}
 
 ## Active Goals
 ${goalSummaries.length > 0 ? goalSummaries.join('\n') : 'No active goals.'}
 
 ## Activity (last 24h)
 - ${runsSince.length} successful runs
-- Total cost: $${runsSince.reduce((sum, r) => sum + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0).toFixed(4)}
+- Total cost: $${runsSince.reduce((sum: number, r: any) => sum + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0).toFixed(4)}
 
 ## Pending Proposals (${pendingProposals.length})
-${pendingProposals.slice(0, 5).map(p => `- [${p.type}] "${p.title}" — awaiting user decision`).join('\n') || 'None'}
+${pendingProposals.slice(0, 5).map((p: any) => `- [${p.type}] "${p.title}" — awaiting user decision`).join('\n') || 'None'}
 
 ## Recently Approved (${approvedProposals.length})
-${approvedProposals.slice(0, 3).map(p => `- [${p.type}] "${p.title}" ✅`).join('\n') || 'None'}
+${approvedProposals.slice(0, 3).map((p: any) => `- [${p.type}] "${p.title}" ✅`).join('\n') || 'None'}
 
 ---
 

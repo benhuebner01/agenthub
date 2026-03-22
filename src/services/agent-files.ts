@@ -122,7 +122,7 @@ export async function generateAllAgentFiles(orgId: string): Promise<number> {
   let count = 0;
 
   // Build parent map for reportsTo resolution
-  const agentMap = new Map(orgAgents.map(a => [a.id, a]));
+  const agentMap = new Map(orgAgents.map((a: any) => [a.id, a]));
 
   // Generate BUSINESS.md as org-level knowledge
   const businessMd = buildBusinessMd(org, orgAgents.length);

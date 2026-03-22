@@ -80,10 +80,10 @@ export async function executeStep(
     const siblingSteps = await db.select().from(planSteps).where(eq(planSteps.goalId, step.goalId));
     const completedIds = new Set(
       siblingSteps
-        .filter(s => s.status === 'completed' || s.status === 'verified')
-        .map(s => s.id)
+        .filter((s: any) => s.status === 'completed' || s.status === 'verified')
+        .map((s: any) => s.id)
     );
-    const unmetDeps = deps.filter(d => !completedIds.has(d));
+    const unmetDeps = deps.filter((d: any) => !completedIds.has(d));
     if (unmetDeps.length > 0) {
       await db.update(planSteps).set({ status: 'blocked', updatedAt: now }).where(eq(planSteps.id, stepId));
       return { stepId, status: 'blocked', error: `Unmet dependencies: ${unmetDeps.join(', ')}` };
@@ -122,7 +122,7 @@ export async function executeStep(
   // Add dependency outputs as context
   if (deps.length > 0) {
     const depSteps = await db.select().from(planSteps).where(eq(planSteps.goalId, step.goalId));
-    const depOutputs = depSteps.filter(s => deps.includes(s.id) && s.output);
+    const depOutputs = depSteps.filter((s: any) => deps.includes(s.id) && s.output);
     if (depOutputs.length > 0) {
       inputParts.push('\n## Context from previous steps');
       for (const dep of depOutputs) {
@@ -233,7 +233,7 @@ async function advanceGoal(goalId: string): Promise<void> {
   const steps = await db.select().from(planSteps).where(eq(planSteps.goalId, goalId));
 
   const completedIds = new Set(
-    steps.filter(s => s.status === 'completed' || s.status === 'verified').map(s => s.id)
+    steps.filter((s: any) => s.status === 'completed' || s.status === 'verified').map((s: any) => s.id)
   );
 
   // Unlock pending steps whose dependencies are now met
@@ -248,7 +248,7 @@ async function advanceGoal(goalId: string): Promise<void> {
 
   // Recalculate goal progress
   const totalSteps = steps.length;
-  const doneSteps = steps.filter(s =>
+  const doneSteps = steps.filter((s: any) =>
     s.status === 'completed' || s.status === 'verified' || s.status === 'skipped'
   ).length + 1; // +1 for the step we just completed
   const progress = totalSteps > 0 ? Math.min(100, Math.round((doneSteps / totalSteps) * 100)) : 0;
@@ -276,7 +276,7 @@ export async function executeReadySteps(
 
   // Execute all ready steps (they are independent since their deps are met)
   const results = await Promise.allSettled(
-    readySteps.map(step => executeStep(step.id, options))
+    readySteps.map((step: any) => executeStep(step.id, options))
   );
 
   return results.map((r, i) => {
