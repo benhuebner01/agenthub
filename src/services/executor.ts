@@ -352,56 +352,107 @@ async function executeClaudeCodeAgent(config: Record<string, unknown>, input: un
 }
 
 // ─── OpenAI Codex CLI Agent ───────────────────────────────────────────────────
-// Codex CLI usage: codex [OPTIONS] [PROMPT]  or  codex exec [OPTIONS] <PROMPT>
-//   Approval modes: --full-auto | --suggest | --ask (default)
-//   Useful flags: --quiet (suppress interactive UI), --model <model>
-//   NOTE: Codex CLI does NOT support --output-format. Use exec subcommand for
-//   non-interactive programmatic use, and --quiet to suppress TUI.
+// Reference: https://developers.openai.com/codex/cli/reference
+//
+// `codex exec` (alias `codex e`) — non-interactive mode for scripting/CI.
+//   Global flags: --full-auto, --model/-m, --sandbox/-s, --cd/-C, --image/-i
+//   Exec-specific: --json (NDJSON events), --output-last-message/-o <path>,
+//                  --ephemeral, --skip-git-repo-check, --color
+//   Approval: --full-auto = workspace-write + on-request approval
+//             --dangerously-bypass-approvals-and-sandbox / --yolo
+//             -a untrusted|on-request|never
 
 async function executeOpenAICodexAgent(config: Record<string, unknown>, input: unknown): Promise<ExecutionResult> {
   const { execSync } = require('child_process');
   const workDir = (config.workDir as string) || process.cwd();
-  const mode = (config.mode as string) || 'full-auto'; // 'full-auto' | 'suggest' | 'ask'
-  const model = (config.model as string) || '';
   const prompt = typeof input === 'string' ? input : JSON.stringify(input);
 
   const env = { ...process.env };
   if (config.apiKeyOverride) (env as any).OPENAI_API_KEY = config.apiKeyOverride;
 
-  // Build command: use `codex exec` for non-interactive programmatic execution
-  // --quiet suppresses the TUI, --full-auto skips all approval prompts
+  // Build command using `codex exec` for non-interactive programmatic execution
   const parts: string[] = ['codex', 'exec'];
-  parts.push(`--${mode}`);
-  parts.push('--quiet');
-  if (model) parts.push('--model', model);
+
+  // Approval mode
+  const mode = (config.mode as string) || 'full-auto';
+  if (mode === 'full-auto') {
+    parts.push('--full-auto');
+  } else if (mode === 'yolo') {
+    parts.push('--dangerously-bypass-approvals-and-sandbox');
+  } else if (mode === 'on-request' || mode === 'untrusted' || mode === 'never') {
+    parts.push('-a', mode);
+  }
+
+  // Model override
+  const model = (config.model as string) || '';
+  if (model) parts.push('-m', model);
+
+  // Sandbox policy
+  const sandbox = config.sandbox as string;
+  if (sandbox) parts.push('-s', sandbox);
+
+  // JSON output for structured parsing
+  parts.push('--json');
+
+  // The prompt
   parts.push(JSON.stringify(prompt));
+
+  // Write last assistant message to temp file for clean output capture
+  const tmpOut = require('path').join(require('os').tmpdir(), `codex-out-${Date.now()}.txt`);
+  parts.push('-o', tmpOut);
 
   const cmd = parts.join(' ');
 
   try {
     const stdout = execSync(cmd, {
       cwd: workDir,
-      timeout: (config.timeoutMs as number) || 180000,
+      timeout: (config.timeoutMs as number) || 300000,
       encoding: 'utf8',
       env,
-      stdio: ['pipe', 'pipe', 'pipe'], // capture all streams, no TTY
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Codex exec returns plain text output — try JSON parse, fall back to raw text
-    let parsed: unknown;
+    // Try reading the -o output file first (clean last message)
+    let output: unknown;
     try {
-      parsed = JSON.parse(stdout);
+      const fs = require('fs');
+      if (fs.existsSync(tmpOut)) {
+        const lastMsg = fs.readFileSync(tmpOut, 'utf8').trim();
+        fs.unlinkSync(tmpOut);
+        // Try JSON parse, fall back to raw text
+        try { output = JSON.parse(lastMsg); } catch { output = lastMsg; }
+      } else {
+        // Fall back to parsing NDJSON stdout (last message event)
+        output = parseCodexNdjson(stdout);
+      }
     } catch {
-      parsed = stdout.trim();
+      output = stdout.trim();
     }
 
-    return { success: true, output: parsed, tokensUsed: 0, costUsd: 0 };
+    return { success: true, output, tokensUsed: 0, costUsd: 0 };
   } catch (err: any) {
-    // Extract useful error info from stderr if available
+    // Clean up temp file on error
+    try { require('fs').unlinkSync(tmpOut); } catch { /* ignore */ }
     const stderr = err.stderr ? String(err.stderr).trim() : '';
     const errMsg = stderr || err.message || 'Codex execution failed';
     return { success: false, output: null, tokensUsed: 0, costUsd: 0, error: errMsg };
   }
+}
+
+/** Parse NDJSON from `codex exec --json` and extract the final assistant message */
+function parseCodexNdjson(ndjson: string): unknown {
+  const lines = ndjson.trim().split('\n').filter(Boolean);
+  let lastMessage: unknown = ndjson.trim();
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line);
+      // Codex NDJSON events have a type field; look for message events
+      if (event.type === 'message' && event.role === 'assistant') {
+        lastMessage = event.content || event;
+      }
+    } catch { /* skip non-JSON lines */ }
+  }
+  return lastMessage;
 }
 
 // ─── Cursor Agent ─────────────────────────────────────────────────────────────

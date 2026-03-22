@@ -1394,9 +1394,10 @@ function OpenAICodexConfig({
         <div>
           <label className={LABEL_CLASS}>Mode</label>
           <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT_CLASS}>
-            <option value="full-auto">full-auto — autonomous, no approvals</option>
-            <option value="suggest">suggest — propose changes only</option>
-            <option value="ask">ask — ask before each action</option>
+            <option value="full-auto">full-auto — workspace-write, on-request approval</option>
+            <option value="on-request">on-request — ask approval per command</option>
+            <option value="untrusted">untrusted — ask approval for everything</option>
+            <option value="yolo">yolo — bypass all approvals &amp; sandbox (dangerous)</option>
           </select>
         </div>
       )}
