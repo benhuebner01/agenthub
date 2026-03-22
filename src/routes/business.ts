@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getApiKeyForProvider } from './settings';
 import { launchOrganization } from '../services/launchOrchestrator';
 import { generateAgentFiles } from '../services/agent-files';
+import { autoSetupOrganization } from '../services/autoSetup';
 
 const router = Router();
 
@@ -1213,6 +1214,17 @@ router.post('/organizations/:id/launch', async (req: Request, res: Response) => 
     const result = await launchOrganization(orgId, ceo.id, teamPlan, {
       teamOverrides: teamOverrides || undefined,
     });
+
+    // Auto-setup Goals, Tool Policies, Workflows (async, non-blocking)
+    const teamAgentIds = result.teamAgents.map((a: any) => a.id);
+    autoSetupOrganization(orgId, {
+      name: org.name,
+      description: org.description || undefined,
+      industry: org.industry || undefined,
+      goals: (org.goals as string[]) || [],
+    }, ceo.id, teamAgentIds).catch((e: any) =>
+      console.error('[Business] Auto-setup failed (non-critical):', e.message)
+    );
 
     // Generate first-run knowledge (async, non-blocking)
     generateFirstRunKnowledge(orgId, org, ceo, '').catch((e: any) =>
