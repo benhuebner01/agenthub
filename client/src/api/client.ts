@@ -621,6 +621,9 @@ export const getHeartbeat = (sinceMin = 5, orgId?: string) =>
 
 // ─── Organization Status ─────────────────────────────────────────────────────
 
+export const updateOrganization = (orgId: string, data: Partial<{ name: string; description: string; industry: string; goals: string[] }>) =>
+  api.put<{ data: Organization }>(`/business/organizations/${orgId}`, data).then((r) => r.data)
+
 export const updateOrgStatus = (orgId: string, status: 'active' | 'paused') =>
   api.patch<{ data: Organization }>(`/business/organizations/${orgId}/status`, { status }).then((r) => r.data)
 

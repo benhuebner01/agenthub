@@ -27,6 +27,7 @@ import {
   rejectProposal,
   runCeo,
   updateOrgStatus,
+  updateOrganization,
   deleteOrganization,
   getAgents,
   updateAgent,
@@ -566,6 +567,11 @@ export default function OrganizationPage() {
   const [ceoInput, setCeoInput] = useState('')
   const [showCeoRun, setShowCeoRun] = useState(false)
   const [editMode, setEditMode] = useState(false)
+  const [editingOrg, setEditingOrg] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [editIndustry, setEditIndustry] = useState('')
+  const [editGoals, setEditGoals] = useState<string[]>([])
 
   const { data: orgsData, isLoading: orgsLoading } = useQuery({
     queryKey: ['organizations'],
@@ -640,6 +646,17 @@ export default function OrganizationPage() {
       if (organizations.length <= 1) {
         navigate('/business-setup')
       }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const updateOrgMutation = useMutation({
+    mutationFn: () => updateOrganization(activeOrgId!, { name: editName, description: editDesc, industry: editIndustry, goals: editGoals.filter(g => g.trim()) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['organizations'] })
+      qc.invalidateQueries({ queryKey: ['orgChart'] })
+      toast.success('Organization updated')
+      setEditingOrg(false)
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -732,10 +749,33 @@ export default function OrganizationPage() {
               </span>
             )}
           </div>
-          <p className="text-sm text-slate-400 mt-1">
-            {org ? org.name : 'Loading...'}
-            {org?.industry && ` · ${org.industry}`}
-          </p>
+          {editingOrg ? (
+            <div className="mt-2 space-y-2 max-w-lg">
+              <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" className="w-full px-3 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50" />
+              <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" rows={2} className="w-full px-3 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200 resize-none focus:outline-none focus:border-accent-purple/50" />
+              <input value={editIndustry} onChange={(e) => setEditIndustry(e.target.value)} placeholder="Industry" className="w-full px-3 py-1.5 bg-dark-bg border border-dark-border rounded-lg text-sm text-slate-200 focus:outline-none focus:border-accent-purple/50" />
+              <div className="space-y-1">
+                {editGoals.map((g, i) => (
+                  <div key={i} className="flex gap-1">
+                    <input value={g} onChange={(e) => setEditGoals(gs => gs.map((x, idx) => idx === i ? e.target.value : x))} placeholder={`Goal ${i + 1}`} className="flex-1 px-3 py-1 bg-dark-bg border border-dark-border rounded-lg text-xs text-slate-200 focus:outline-none focus:border-accent-purple/50" />
+                    <button onClick={() => setEditGoals(gs => gs.filter((_, idx) => idx !== i))} className="text-slate-500 hover:text-red-400 px-1"><Trash2 className="w-3 h-3" /></button>
+                  </div>
+                ))}
+                <button onClick={() => setEditGoals(gs => [...gs, ''])} className="text-xs text-slate-400 hover:text-accent-purple flex items-center gap-1"><Plus className="w-3 h-3" /> Add goal</button>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => updateOrgMutation.mutate()} disabled={updateOrgMutation.isPending} className="px-3 py-1.5 bg-accent-purple hover:bg-purple-600 disabled:opacity-50 text-white text-xs rounded-lg flex items-center gap-1"><Save className="w-3 h-3" /> Save</button>
+                <button onClick={() => setEditingOrg(false)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 text-xs rounded-lg border border-dark-border">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400 mt-1 cursor-pointer hover:text-slate-300" onClick={() => { if (org) { setEditName(org.name); setEditDesc(org.description || ''); setEditIndustry(org.industry || ''); setEditGoals(org.goals || []); setEditingOrg(true); } }}>
+              {org ? org.name : 'Loading...'}
+              {org?.industry && ` · ${org.industry}`}
+              {org?.description && ` — ${org.description}`}
+              <Pencil className="w-3 h-3 inline ml-2 opacity-40" />
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {organizations.length > 1 && (

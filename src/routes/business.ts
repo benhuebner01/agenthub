@@ -165,6 +165,20 @@ router.post('/create', async (req: Request, res: Response) => {
       updatedAt: now,
     }).returning();
 
+    // Store org settings as shared memory
+    if (organizationData.orgMode) {
+      await db.insert(sharedMemory).values({
+        id: uuidv4(), organizationId: orgId, key: '__org_mode',
+        value: organizationData.orgMode, createdByAgentId: null, updatedAt: now,
+      }).onConflictDoNothing();
+    }
+    if (organizationData.maxRealAgents !== undefined && organizationData.maxRealAgents !== null) {
+      await db.insert(sharedMemory).values({
+        id: uuidv4(), organizationId: orgId, key: '__max_real_agents',
+        value: String(organizationData.maxRealAgents), createdByAgentId: null, updatedAt: now,
+      }).onConflictDoNothing();
+    }
+
     // Create CEO agent
     const ceoId = uuidv4();
     const [ceoAgent] = await db.insert(agents).values({
@@ -201,6 +215,29 @@ router.post('/create', async (req: Request, res: Response) => {
           updatedAt: now,
         }).returning();
         teamAgents.push(teamAgent);
+      }
+
+      // Second pass: resolve reportsTo by name for agents that didn't get a parent
+      const allCreatedAgents = [{ id: ceoId, name: ceoConfig.name || `${organizationData.name} CEO`, role: 'ceo' }, ...teamAgents.map((a: any) => ({ id: a.id, name: a.name, role: a.role }))];
+      const nameToId = new Map(allCreatedAgents.map((a: any) => [a.name.toLowerCase(), a.id]));
+
+      for (let i = 0; i < teamConfigs.length; i++) {
+        const config = teamConfigs[i];
+        const agent = teamAgents[i];
+        if (!agent) continue;
+
+        // Skip if already has correct parent
+        if (config.reportsTo === 'ceo') continue;
+
+        // Try to resolve reportsTo name
+        if (config.reportsTo) {
+          const parentId = nameToId.get(config.reportsTo.toLowerCase());
+          if (parentId && parentId !== agent.id) {
+            await db.update(agents)
+              .set({ parentAgentId: parentId, updatedAt: now })
+              .where(eq(agents.id, agent.id));
+          }
+        }
       }
     }
 
@@ -371,6 +408,35 @@ router.get('/organizations/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Business] GET /organizations/:id error:', err);
     res.status(500).json({ error: 'Failed to fetch organization' });
+  }
+});
+
+// ─── PUT /api/business/organizations/:id ──────────────────────────────────────
+
+router.put('/organizations/:id', async (req: Request, res: Response) => {
+  try {
+    const { name, description, industry, goals, orgMode, maxRealAgents } = req.body;
+    const [existing] = await db.select().from(organizations).where(eq(organizations.id, req.params.id));
+    if (!existing) {
+      res.status(404).json({ error: 'Organization not found' });
+      return;
+    }
+
+    const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+    if (name !== undefined) updates.name = name;
+    if (description !== undefined) updates.description = description;
+    if (industry !== undefined) updates.industry = industry;
+    if (goals !== undefined) updates.goals = goals;
+
+    const [updated] = await db.update(organizations)
+      .set(updates)
+      .where(eq(organizations.id, req.params.id))
+      .returning();
+
+    res.json({ data: updated });
+  } catch (err: any) {
+    console.error('[Business] PUT /organizations/:id error:', err);
+    res.status(500).json({ error: 'Failed to update organization' });
   }
 });
 

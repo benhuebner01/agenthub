@@ -109,10 +109,25 @@ export default function BusinessSetup() {
   const createMutation = useMutation({
     mutationFn: () => {
       if (!analysisResult || !editableCeo) throw new Error('No analysis data')
-      let finalTeam = editableTeam
+      let finalTeam = [...editableTeam]
+
+      // Apply subagent mappings: set reportsTo for internal agents assigned to real agents
+      for (const [realIdxStr, internalIdxes] of Object.entries(subagentMap)) {
+        const realIdx = Number(realIdxStr)
+        const realAgent = editableTeam[realIdx]
+        if (realAgent) {
+          for (const intIdx of internalIdxes) {
+            const intAgent = finalTeam.find((a, i) => i === intIdx)
+            if (intAgent) {
+              intAgent.reportsTo = realAgent.name
+            }
+          }
+        }
+      }
+
       if (orgMode === 'one-agent') {
-        const realAgents = editableTeam.filter((a) => isRealAgent(a.type))
-        const internalAgents = editableTeam.filter((a) => a.type === 'internal')
+        const realAgents = finalTeam.filter((a) => isRealAgent(a.type))
+        const internalAgents = finalTeam.filter((a) => a.type === 'internal')
         finalTeam = realAgents.length > 0 ? [realAgents[0], ...internalAgents] : internalAgents
       }
       if (maxRealAgents !== null) {
