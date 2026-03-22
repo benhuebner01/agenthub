@@ -52,10 +52,44 @@ export const MODEL_SPECS: Record<string, {
   'o4-mini':                    { provider: 'openai',    contextWindow: 200000,  maxOutput: 100000, suggestedOutput: 80000 },
 };
 
+/**
+ * Models that require max_completion_tokens instead of max_tokens.
+ * GPT-5 family, o-series reasoning models reject max_tokens with a 400 error.
+ */
+const MODELS_REQUIRING_MAX_COMPLETION_TOKENS = new Set([
+  'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
+  'gpt-5.1', 'gpt-5.1-mini', 'gpt-5.1-nano',
+  'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano',
+  'o1', 'o1-mini', 'o1-preview',
+  'o3', 'o3-mini', 'o3-pro',
+  'o4-mini',
+]);
+
+function modelRequiresMaxCompletionTokens(model: string): boolean {
+  if (MODELS_REQUIRING_MAX_COMPLETION_TOKENS.has(model)) return true;
+  // Catch future gpt-5.x, o5, etc.
+  if (/^(gpt-5|o\d)/.test(model)) return true;
+  return false;
+}
+
 function getMaxTokens(config: Record<string, unknown>, model: string): number {
-  if (config.max_tokens && (config.max_tokens as number) > 0) return config.max_tokens as number;
+  // Accept both parameter names from user config
+  const userVal = (config.max_completion_tokens as number) || (config.max_tokens as number);
+  if (userVal && userVal > 0) return userVal;
   const spec = MODEL_SPECS[model];
   return spec ? spec.suggestedOutput : 8192;
+}
+
+/**
+ * Build the correct token-limit parameter for an OpenAI API call.
+ * Returns { max_completion_tokens: N } or { max_tokens: N } depending on model.
+ */
+function buildTokenLimitParam(config: Record<string, unknown>, model: string): Record<string, number> {
+  const value = getMaxTokens(config, model);
+  if (modelRequiresMaxCompletionTokens(model)) {
+    return { max_completion_tokens: value };
+  }
+  return { max_tokens: value };
 }
 
 // ─── Result Type ──────────────────────────────────────────────────────────────
@@ -228,7 +262,7 @@ async function executeOpenAIAgent(config: Record<string, unknown>, input: unknow
 
   const response = await client.chat.completions.create({
     model,
-    max_tokens: getMaxTokens(config, model),
+    ...buildTokenLimitParam(config, model),
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },
@@ -548,7 +582,7 @@ async function executeInternalAgent(config: Record<string, unknown>, input: unkn
     const systemPrompt = baseSystemPrompt + memoryContext;
     const resp = await client.chat.completions.create({
       model,
-      max_tokens: getMaxTokens(config, model),
+      ...buildTokenLimitParam(config, model),
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) },

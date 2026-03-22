@@ -667,7 +667,7 @@ function ClaudeConfig({
   )
   const spec = MODEL_SPECS[model]
   const defaultTokens = spec ? spec.suggestedOutput : 8192
-  const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || defaultTokens))
+  const [maxTokens, setMaxTokens] = useState(String((config.max_completion_tokens as number) || (config.max_tokens as number) || defaultTokens))
   const [apiKey, setApiKey] = useState((config.api_key_override as string) || '')
   const [showApiKey, setShowApiKey] = useState(false)
   const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
@@ -682,7 +682,9 @@ function ClaudeConfig({
   }
 
   useEffect(() => {
-    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || defaultTokens }
+    // Anthropic uses max_tokens, OpenAI GPT-5/o-series uses max_completion_tokens
+    const tokenVal = parseInt(maxTokens) || defaultTokens
+    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: tokenVal }
     if (apiKey) c.api_key_override = apiKey
     onChange(c)
   }, [model, systemPrompt, maxTokens, apiKey])
@@ -797,7 +799,7 @@ function OpenAIConfig({
   )
   const oSpec = MODEL_SPECS[model]
   const oDefaultTokens = oSpec ? oSpec.suggestedOutput : 8192
-  const [maxTokens, setMaxTokens] = useState(String((config.max_tokens as number) || oDefaultTokens))
+  const [maxTokens, setMaxTokens] = useState(String((config.max_completion_tokens as number) || (config.max_tokens as number) || oDefaultTokens))
   const [apiKey, setApiKey] = useState((config.api_key_override as string) || '')
   const [showApiKey, setShowApiKey] = useState(false)
   const [keyStatus, setKeyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
@@ -812,7 +814,9 @@ function OpenAIConfig({
   }
 
   useEffect(() => {
-    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: parseInt(maxTokens) || oDefaultTokens }
+    // Executor handles the correct param name per model automatically
+    const tokenVal = parseInt(maxTokens) || oDefaultTokens
+    const c: Record<string, unknown> = { model, systemPrompt, max_tokens: tokenVal }
     if (apiKey) c.api_key_override = apiKey
     onChange(c)
   }, [model, systemPrompt, maxTokens, apiKey])

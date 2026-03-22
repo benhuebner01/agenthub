@@ -92,9 +92,11 @@ router.post('/chat', async (req: Request, res: Response) => {
       }
       messages.push({ role: 'user', content: message.trim() });
 
+      // GPT-5/o-series models require max_completion_tokens instead of max_tokens
+      const useNewParam = /^(gpt-5|o\d)/.test(model);
       const response = await client.chat.completions.create({
         model,
-        max_tokens: 1024,
+        ...(useNewParam ? { max_completion_tokens: 1024 } : { max_tokens: 1024 }),
         messages,
       });
 
